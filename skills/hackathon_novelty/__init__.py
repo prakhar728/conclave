@@ -101,4 +101,58 @@ skill_card = SkillCard(
     input_model=HackathonSubmission,
     output_keys=ALLOWED_OUTPUT_KEYS,
     config={"min_submissions": MIN_SUBMISSIONS},
+    trigger_modes=[
+        {
+            "mode": "threshold",
+            "description": (
+                "Pipeline auto-fires once the number of submissions reaches min_submissions. "
+                "Re-runs on every subsequent submission so all scores stay current."
+            ),
+            "default_config": {"min_submissions": MIN_SUBMISSIONS},
+            "operator_configurable": True,
+        },
+        {
+            "mode": "manual",
+            "description": (
+                "Operator explicitly triggers a full evaluation run at any time, "
+                "regardless of submission count."
+            ),
+        },
+    ],
+    roles={
+        "operator": {
+            "description": (
+                "Hackathon director. Initialises the instance, sets evaluation criteria "
+                "and guidelines, configures the submission threshold, and may trigger "
+                "manual evaluation runs. Sees aggregated results for all submissions."
+            ),
+            "capabilities": ["configure", "trigger", "view_all_results"],
+        },
+        "participant": {
+            "description": (
+                "Hackathon team. Submits idea text and optional supporting materials. "
+                "Receives only their own novelty score and criteria breakdown — "
+                "never sees other teams' submissions or scores."
+            ),
+            "capabilities": ["submit"],
+            "result_view": "own",
+        },
+    },
+    setup_prompt=(
+        "This skill scores hackathon submissions for novelty and originality inside a TEE. "
+        "No raw submission content ever leaves the enclave.\n\n"
+        "As the operator, you need to provide:\n"
+        "1. Evaluation criteria — a dict of criterion names to weights that sum to 1.0. "
+        "Example: {\"originality\": 0.4, \"feasibility\": 0.3, \"impact\": 0.3}\n"
+        "2. Guidelines — optional free-text instructions for the judging agent (e.g. 'Focus on AI/ML innovations').\n"
+        "3. Trigger mode — choose 'threshold' (pipeline auto-runs once N submissions arrive) "
+        "or 'manual' (you trigger evaluation yourself). Default threshold is 5 submissions, "
+        "and you can override this.\n\n"
+        "Participants submit:\n"
+        "- idea_text (required): A description of their hackathon idea.\n"
+        "- repo_summary (optional): Technical details or a summary of their implementation.\n"
+        "- deck_text (optional): Pitch deck or business case content.\n\n"
+        "Each participant receives: novelty_score (0-1), percentile rank, cluster assignment, "
+        "per-criteria scores (0-10), and analysis status. They never see other teams' data."
+    ),
 )
