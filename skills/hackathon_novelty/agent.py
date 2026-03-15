@@ -47,8 +47,8 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     submission_ids: list[str]               # all IDs being processed this run
     triage_context: dict                    # {submission_id: {novelty, percentile, cluster, similar_ids, cluster_size, has_repo, has_deck}}
-    criteria: dict[str, float]             # operator criteria weights
-    guidelines: str                         # operator guidelines
+    criteria: dict[str, float]             # admin criteria weights
+    guidelines: str                         # admin guidelines
     classifications: dict[str, str]        # {submission_id: "duplicate" | "quick" | "analyze"}
     flagged_ids: list[str]                 # routed to flag node
     quick_ids: list[str]                   # routed to quick node

@@ -3,11 +3,11 @@ from __future__ import annotations
 SkillCard — the self-declaration contract every skill must provide.
 
 Each skill exports a SkillCard instance that declares:
-- input_model:    Pydantic model for validating participant submissions
+- input_model:    Pydantic model for validating user submissions
 - output_keys:    Guardrail whitelist — only these keys leave the pipeline
 - trigger_modes:  How/when the pipeline runs (threshold, manual, instant)
-- roles:          What operator vs participant can do and see
-- setup_prompt:   Text block for LLM-guided operator onboarding
+- roles:          What admin vs user can do and see
+- setup_prompt:   Text block for LLM-guided admin onboarding
 - config:         Skill-specific defaults (thresholds, bounds, etc.)
 
 Security note:
@@ -31,8 +31,8 @@ class SkillCard:
     output_keys: set                     # allowed output keys (mirrors ALLOWED_OUTPUT_KEYS)
     config: dict = field(default_factory=dict)          # skill-specific config params
     trigger_modes: list = field(default_factory=list)   # supported trigger declarations
-    roles: dict = field(default_factory=dict)           # operator + participant role declarations
-    setup_prompt: str = ""                              # LLM onboarding text for operators (metadata/docs)
+    roles: dict = field(default_factory=dict)           # admin + user role declarations
+    setup_prompt: str = ""                              # LLM onboarding text for admins (metadata/docs)
     init_handler: Optional[Callable] = None             # skill-owned onboarding conversation handler
     version: str = "0.1.0"
 

@@ -10,7 +10,7 @@ Workflow covered:
     2. Participant submits below threshold → received_pending
     3. 5th submission auto-triggers pipeline → received_analysis_complete
     4. Operator manual trigger → runs pipeline
-    5. Role-based result views (operator sees all, participant sees own)
+    5. Role-based result views (admin sees all, user sees own)
     6. Token enforcement (missing/wrong/wrong-role → 401/403)
 """
 from __future__ import annotations
@@ -106,8 +106,8 @@ def test_operator_init_loop(client):
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "configuring"
-        assert body["operator_token"] is None
-        assert body["participant_token"] is None
+        assert body["admin_token"] is None
+        assert body["user_token"] is None
         instance_id = body["instance_id"]
 
         # Turn 2: operator provides criteria → ready
@@ -119,8 +119,8 @@ def test_operator_init_loop(client):
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "ready"
-        assert body["operator_token"] is not None
-        assert body["participant_token"] is not None
+        assert body["admin_token"] is not None
+        assert body["user_token"] is not None
         assert body["instance_id"] == instance_id
 
 
@@ -142,15 +142,15 @@ def test_full_e2e_workflow(client):
             "message": "originality 0.5, feasibility 0.5",
             "instance_id": instance_id,
         })
-        op_token = r.json()["operator_token"]
-        pt_token = r.json()["participant_token"]
+        admin_token = r.json()["admin_token"]
+        user_token = r.json()["user_token"]
 
         # Step 3: Submit 4 times — all below threshold
         for i in range(1, 5):
             r = client.post(
                 "/submit",
                 json={"submission_id": f"sub_00{i}", "idea_text": f"Idea number {i}"},
-                headers={"X-Instance-Token": pt_token},
+                headers={"X-Instance-Token": user_token},
             )
             assert r.status_code == 200
             body = r.json()
@@ -161,13 +161,13 @@ def test_full_e2e_workflow(client):
         r = client.post(
             "/submit",
             json={"submission_id": "sub_005", "idea_text": "Fifth idea, triggers pipeline"},
-            headers={"X-Instance-Token": pt_token},
+            headers={"X-Instance-Token": user_token},
         )
         assert r.status_code == 200
         assert r.json()["status"] == "received_analysis_complete"
 
         # Step 5: Participant views their own result
-        r = client.get("/results/sub_001", headers={"X-Instance-Token": pt_token})
+        r = client.get("/results/sub_001", headers={"X-Instance-Token": user_token})
         assert r.status_code == 200
         body = r.json()
         assert body["submission_id"] == "sub_001"
@@ -175,14 +175,14 @@ def test_full_e2e_workflow(client):
         assert "criteria_scores" in body
 
         # Step 6: Operator views all results
-        r = client.get("/results", headers={"X-Instance-Token": op_token})
+        r = client.get("/results", headers={"X-Instance-Token": admin_token})
         assert r.status_code == 200
         results = r.json()["results"]
         assert len(results) == 5
         assert all("submission_id" in res for res in results)
 
         # Step 7: Operator manual trigger
-        r = client.post("/trigger", headers={"X-Instance-Token": op_token})
+        r = client.post("/trigger", headers={"X-Instance-Token": admin_token})
         assert r.status_code == 200
         assert r.json()["status"] == "complete"
         assert r.json()["results_count"] == 5
@@ -199,8 +199,8 @@ def test_token_enforcement(client):
             "message": "criteria ready",
             "instance_id": instance_id,
         })
-        op_token = r.json()["operator_token"]
-        pt_token = r.json()["participant_token"]
+        admin_token = r.json()["admin_token"]
+        user_token = r.json()["user_token"]
 
     # No token → 401
     r = client.post("/submit", json={"submission_id": "s1", "idea_text": "idea"})
@@ -215,18 +215,18 @@ def test_token_enforcement(client):
     assert r.status_code == 403
 
     # Participant cannot trigger manually
-    r = client.post("/trigger", headers={"X-Instance-Token": pt_token})
+    r = client.post("/trigger", headers={"X-Instance-Token": user_token})
     assert r.status_code == 403
 
     # Participant cannot view all results
-    r = client.get("/results", headers={"X-Instance-Token": pt_token})
+    r = client.get("/results", headers={"X-Instance-Token": user_token})
     assert r.status_code == 403
 
     # Operator can submit (allowed by role)
     r = client.post(
         "/submit",
         json={"submission_id": "s1", "idea_text": "operator's idea"},
-        headers={"X-Instance-Token": op_token},
+        headers={"X-Instance-Token": admin_token},
     )
     assert r.status_code == 200
 
@@ -242,9 +242,9 @@ def test_result_not_found_before_pipeline(client):
             "message": "ready",
             "instance_id": instance_id,
         })
-        pt_token = r.json()["participant_token"]
+        user_token = r.json()["user_token"]
 
-    r = client.get("/results/sub_001", headers={"X-Instance-Token": pt_token})
+    r = client.get("/results/sub_001", headers={"X-Instance-Token": user_token})
     assert r.status_code == 404
 
 

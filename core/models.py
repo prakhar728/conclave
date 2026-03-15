@@ -34,7 +34,7 @@ class SkillResponse(BaseModel):
 
 class InitRequest(BaseModel):
     skill_name: str
-    message: str                        # operator's configuration message
+    message: str                        # admin's configuration message
     instance_id: Optional[str] = None   # None on first call, set on subsequent calls
 
 
@@ -42,5 +42,5 @@ class InitResponse(BaseModel):
     instance_id: str
     status: str                              # "configuring" | "ready"
     message: str                             # LLM response (question or confirmation)
-    operator_token: Optional[str] = None     # only when status="ready"
-    participant_token: Optional[str] = None  # only when status="ready"
+    admin_token: Optional[str] = None     # only when status="ready"
+    user_token: Optional[str] = None      # only when status="ready"

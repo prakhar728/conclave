@@ -30,7 +30,7 @@ from skills.hackathon_novelty.config import MIN_SUBMISSIONS
 
 _SYSTEM_PROMPT = (
     "You are setting up a hackathon novelty evaluation instance. "
-    "Your job is to collect the required configuration from the operator.\n\n"
+    "Your job is to collect the required configuration from the admin.\n\n"
     "REQUIRED:\n"
     "- criteria: a dict of criterion names to weights that sum to exactly 1.0\n"
     "  Example: {\"originality\": 0.4, \"feasibility\": 0.3, \"impact\": 0.3}\n\n"
@@ -61,7 +61,7 @@ def _parse_llm_response(text: str) -> Optional[dict]:
 
 def hackathon_init_handler(message: str, conversation: list[dict]) -> dict:
     """
-    Handle one turn of the operator onboarding conversation.
+    Handle one turn of the admin onboarding conversation.
 
     Called by the API on each POST /init. The API passes the accumulated
     conversation; this handler appends the new messages and returns the result.

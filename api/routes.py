@@ -118,17 +118,17 @@ async def init_instance(body: InitRequest):
         inst["config"].instance_id = instance_id
         inst["threshold"] = result.get("threshold", inst["threshold"])
 
-        operator_token = secrets.token_urlsafe(16)
-        participant_token = secrets.token_urlsafe(16)
-        _tokens[operator_token] = {"instance_id": instance_id, "role": "operator"}
-        _tokens[participant_token] = {"instance_id": instance_id, "role": "participant"}
+        admin_token = secrets.token_urlsafe(16)
+        user_token = secrets.token_urlsafe(16)
+        _tokens[admin_token] = {"instance_id": instance_id, "role": "admin"}
+        _tokens[user_token] = {"instance_id": instance_id, "role": "user"}
 
         return InitResponse(
             instance_id=instance_id,
             status="ready",
             message=result["message"],
-            operator_token=operator_token,
-            participant_token=participant_token,
+            admin_token=admin_token,
+            user_token=user_token,
         )
 
     return InitResponse(
@@ -185,10 +185,10 @@ async def submit(submission: dict, request: Request):
 
 @router.post("/trigger")
 async def trigger(request: Request):
-    """Manual pipeline trigger. Operator only. Uses stored instance config."""
+    """Manual pipeline trigger. Admin only. Uses stored instance config."""
     token_info = _resolve_token(request)
-    if token_info["role"] != "operator":
-        raise HTTPException(status_code=403, detail="Only operator can trigger manually")
+    if token_info["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can trigger manually")
 
     instance_id = token_info["instance_id"]
     if not _submissions.get(instance_id):
@@ -200,10 +200,10 @@ async def trigger(request: Request):
 
 @router.get("/results")
 def get_all_results(request: Request):
-    """Return all results for the instance. Operator only."""
+    """Return all results for the instance. Admin only."""
     token_info = _resolve_token(request)
-    if token_info["role"] != "operator":
-        raise HTTPException(status_code=403, detail="Only operator can view all results")
+    if token_info["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can view all results")
 
     instance_id = token_info["instance_id"]
     return {"results": list(_results.get(instance_id, {}).values())}
@@ -213,8 +213,8 @@ def get_all_results(request: Request):
 def get_results(submission_id: str, request: Request):
     """
     Return result for a single submission.
-    Participant: only sees their own result (submission_id must match).
-    Operator: can see any submission's result.
+    User: only sees their own result (submission_id must match).
+    Admin: can see any submission's result.
     """
     token_info = _resolve_token(request)
     instance_id = token_info["instance_id"]
@@ -225,10 +225,10 @@ def get_results(submission_id: str, request: Request):
     if submission_id not in instance_results:
         raise HTTPException(status_code=404, detail="Result not found or not yet available")
 
-    if role == "participant":
-        # Participants can only retrieve their own result
+    if role == "user":
+        # Users can only retrieve their own result
         # The submission_id path param is the identifier — no further check needed
-        # since participants know their own submission_id
+        # since users know their own submission_id
         return instance_results[submission_id]
 
     return instance_results[submission_id]

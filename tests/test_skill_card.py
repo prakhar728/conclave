@@ -150,11 +150,11 @@ def test_hackathon_card_threshold_mode_default_config():
 
 def test_hackathon_card_roles():
     roles = hackathon_card.roles
-    assert "operator" in roles
-    assert "participant" in roles
-    assert "view_all_results" in roles["operator"]["capabilities"]
-    assert roles["participant"]["result_view"] == "own"
-    assert "submit" in roles["participant"]["capabilities"]
+    assert "admin" in roles
+    assert "user" in roles
+    assert "view_all_results" in roles["admin"]["capabilities"]
+    assert roles["user"]["result_view"] == "own"
+    assert "submit" in roles["user"]["capabilities"]
 
 
 def test_hackathon_card_setup_prompt_nonempty():

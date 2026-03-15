@@ -13,4 +13,5 @@ langgraph
 python-dotenv
 pytest
 httpx
+
 scipy
