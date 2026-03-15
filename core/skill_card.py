@@ -17,7 +17,7 @@ Prompt injection defense relies on programmatic guardrails (guardrails.py)
 away from the LLM. If new tools expose raw text, update guardrails.py.
 """
 from dataclasses import dataclass, field
-from typing import Callable, Type
+from typing import Callable, Optional, Type
 
 from pydantic import BaseModel
 
@@ -32,7 +32,8 @@ class SkillCard:
     config: dict = field(default_factory=dict)          # skill-specific config params
     trigger_modes: list = field(default_factory=list)   # supported trigger declarations
     roles: dict = field(default_factory=dict)           # operator + participant role declarations
-    setup_prompt: str = ""                              # LLM onboarding text for operators
+    setup_prompt: str = ""                              # LLM onboarding text for operators (metadata/docs)
+    init_handler: Optional[Callable] = None             # skill-owned onboarding conversation handler
     version: str = "0.1.0"
 
     def metadata(self) -> dict:

@@ -23,6 +23,7 @@ from skills.hackathon_novelty.tools import set_context
 from skills.hackathon_novelty.agent import run_agent
 from skills.hackathon_novelty.guardrails import HackathonNoveltyFilter
 from skills.hackathon_novelty.config import ALLOWED_OUTPUT_KEYS, MIN_SUBMISSIONS
+from skills.hackathon_novelty.init import hackathon_init_handler
 
 
 def run_skill(inputs: list[HackathonSubmission], params: OperatorConfig) -> SkillResponse:
@@ -155,4 +156,5 @@ skill_card = SkillCard(
         "Each participant receives: novelty_score (0-1), percentile rank, cluster assignment, "
         "per-criteria scores (0-10), and analysis status. They never see other teams' data."
     ),
+    init_handler=hackathon_init_handler,
 )

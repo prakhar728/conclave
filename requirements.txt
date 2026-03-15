@@ -12,4 +12,5 @@ langchain-google-genai
 langgraph
 python-dotenv
 pytest
+httpx
 scipy

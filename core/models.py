@@ -30,3 +30,17 @@ class SkillResponse(BaseModel):
     trace: Optional[list[dict]] = None
     enclave_signature: Optional[str] = None   # added by infra side
     attestation_quote: Optional[str] = None   # added by infra side
+
+
+class InitRequest(BaseModel):
+    skill_name: str
+    message: str                        # operator's configuration message
+    instance_id: Optional[str] = None   # None on first call, set on subsequent calls
+
+
+class InitResponse(BaseModel):
+    instance_id: str
+    status: str                              # "configuring" | "ready"
+    message: str                             # LLM response (question or confirmation)
+    operator_token: Optional[str] = None     # only when status="ready"
+    participant_token: Optional[str] = None  # only when status="ready"
