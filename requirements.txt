@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+sentence-transformers
+scikit-learn
+numpy
+pydantic>=2.0
+pydantic-settings
+langchain-core
+langchain-openai
+langchain-anthropic
+langchain-google-genai
+langgraph
+python-dotenv
+pytest
+httpx
+
+scipy
