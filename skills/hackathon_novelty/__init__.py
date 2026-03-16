@@ -76,7 +76,7 @@ def run_skill(inputs: list[HackathonSubmission], params: OperatorConfig) -> Skil
             percentile=float(det["percentiles"][i]),
             cluster=det["clusters"][i],
             criteria_scores=ar.get("criteria_scores", {}),
-            status=ar.get("status", "analyzed"),
+            status=ar.get("status", "analyzed") if ar else "error",
             analysis_depth=ar.get("analysis_depth", "full"),
             duplicate_of=ar.get("duplicate_of", None),
         )

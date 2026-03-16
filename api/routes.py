@@ -170,6 +170,11 @@ async def submit(submission: dict, request: Request):
     count = len(_submissions[instance_id])
     threshold = _instances[instance_id]["threshold"]
 
+    # CONCURRENCY NOTE: This threshold check is not atomic. Concurrent submissions could
+    # both see count >= threshold and trigger _run_pipeline twice. This is a non-issue in
+    # the current deployment model — the TEE container runs single-worker uvicorn which
+    # serializes all requests. If deployment changes to allow concurrent request handling,
+    # add a per-instance asyncio.Lock around this check.
     if count >= threshold:
         await _run_pipeline(instance_id)
         return {

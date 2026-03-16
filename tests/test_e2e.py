@@ -74,6 +74,11 @@ def _make_init_handler():
     return handler
 
 
+# NOTE — Shared user_token limitation (accepted scope for hackathon):
+# All participants in an instance share a single user_token. Any participant who learns
+# another's submission_id can read their result. Per-user token isolation is Person A's
+# auth domain and is deferred until the external auth layer is built.
+
 # --- Fixtures ---
 
 @pytest.fixture(autouse=True)
@@ -347,3 +352,103 @@ def test_init_rejects_non_numeric_threshold():
         result = hackathon_init_handler("bad threshold", [])
     assert result["status"] == "configuring"
     assert "threshold" in result["message"].lower()
+
+
+def test_missing_agent_result_produces_error_status():
+    """When agent output is missing a submission_id, that result gets status='error'."""
+    import numpy as np
+    from unittest.mock import patch
+    from skills.hackathon_novelty import run_skill
+    from skills.hackathon_novelty.models import HackathonSubmission
+    from core.models import OperatorConfig
+
+    inputs = [
+        HackathonSubmission(submission_id=f"sub_{i:03d}", idea_text=f"Unique idea number {i}")
+        for i in range(1, 6)
+    ]
+    params = OperatorConfig(criteria={"originality": 0.5, "feasibility": 0.5})
+
+    # Agent returns results for sub_001 through sub_004 only — sub_005 is missing
+    partial_results = [
+        {
+            "submission_id": f"sub_{i:03d}",
+            "criteria_scores": {"originality": 7.0, "feasibility": 6.0},
+            "status": "analyzed",
+            "analysis_depth": "full",
+        }
+        for i in range(1, 5)
+    ]
+
+    det_output = {
+        "embeddings": np.zeros((5, 384)),
+        "sim_matrix": np.eye(5),
+        "novelty_scores": np.array([0.5, 0.6, 0.7, 0.8, 0.9]),
+        "percentiles": np.array([20.0, 40.0, 60.0, 80.0, 100.0]),
+        "clusters": ["A", "A", "B", "B", "C"],
+        "submission_ids": [f"sub_{i:03d}" for i in range(1, 6)],
+    }
+
+    with patch("skills.hackathon_novelty.run_deterministic", return_value=det_output), \
+         patch("skills.hackathon_novelty.run_agent", return_value=partial_results):
+        response = run_skill(inputs, params)
+
+    by_id = {r["submission_id"]: r for r in response.results}
+    assert by_id["sub_005"]["status"] == "error"
+    for i in range(1, 5):
+        assert by_id[f"sub_{i:03d}"]["status"] == "analyzed"
+
+
+def test_retrigger_on_6th_submission(client):
+    """After threshold triggers on 5th submission, 6th submission re-triggers with all 6 scored."""
+    handler = _make_init_handler()
+    with patch.object(skill_card, "init_handler", handler), \
+         patch.object(skill_card, "run", _fake_run_skill):
+        r = client.post("/init", json={"skill_name": "hackathon_novelty", "message": "start"})
+        instance_id = r.json()["instance_id"]
+        r = client.post("/init", json={
+            "skill_name": "hackathon_novelty",
+            "message": "ready",
+            "instance_id": instance_id,
+        })
+        user_token = r.json()["user_token"]
+        admin_token = r.json()["admin_token"]
+
+        for i in range(1, 6):
+            client.post(
+                "/submit",
+                json={"submission_id": f"sub_{i:03d}", "idea_text": f"Idea {i}"},
+                headers={"X-Instance-Token": user_token},
+            )
+
+        r = client.post(
+            "/submit",
+            json={"submission_id": "sub_006", "idea_text": "Sixth idea"},
+            headers={"X-Instance-Token": user_token},
+        )
+        assert r.status_code == 200
+        assert r.json()["status"] == "received_analysis_complete"
+        assert r.json()["submissions_count"] == 6
+
+        r = client.get("/results", headers={"X-Instance-Token": admin_token})
+        assert len(r.json()["results"]) == 6
+
+
+def test_submit_missing_submission_id_returns_422(client):
+    """Submitting without a submission_id returns 422."""
+    handler = _make_init_handler()
+    with patch.object(skill_card, "init_handler", handler):
+        r = client.post("/init", json={"skill_name": "hackathon_novelty", "message": "start"})
+        instance_id = r.json()["instance_id"]
+        r = client.post("/init", json={
+            "skill_name": "hackathon_novelty",
+            "message": "ready",
+            "instance_id": instance_id,
+        })
+        user_token = r.json()["user_token"]
+
+    r = client.post(
+        "/submit",
+        json={"idea_text": "No submission_id provided"},
+        headers={"X-Instance-Token": user_token},
+    )
+    assert r.status_code == 422
