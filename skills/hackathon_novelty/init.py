@@ -92,7 +92,33 @@ def hackathon_init_handler(message: str, conversation: list[dict]) -> dict:
     if extracted:
         criteria = extracted.get("criteria", {})
         guidelines = extracted.get("guidelines", "")
-        threshold = int(extracted.get("threshold", MIN_SUBMISSIONS))
+
+        if not criteria:
+            return {
+                "status": "configuring",
+                "message": "Criteria cannot be empty. Please provide at least one criterion with a weight.",
+                "conversation": conversation,
+            }
+
+        weight_sum = sum(criteria.values())
+        if abs(weight_sum - 1.0) > 0.01:
+            return {
+                "status": "configuring",
+                "message": f"Criteria weights must sum to 1.0 (got {weight_sum:.2f}). Please adjust.",
+                "conversation": conversation,
+            }
+
+        try:
+            threshold = int(extracted.get("threshold", MIN_SUBMISSIONS))
+            if threshold < 1:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            return {
+                "status": "configuring",
+                "message": "Threshold must be a positive integer. Please provide a valid number.",
+                "conversation": conversation,
+            }
+
         config = OperatorConfig(criteria=criteria, guidelines=guidelines)
         return {
             "status": "ready",

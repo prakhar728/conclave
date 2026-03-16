@@ -286,3 +286,64 @@ def test_skills_metadata_endpoints(client):
     # Non-existent skill
     r = client.get("/skills/nonexistent_skill")
     assert r.status_code == 404
+
+
+def test_init_unknown_skill_returns_404(client):
+    """POST /init with a non-existent skill_name returns 404, not 500."""
+    r = client.post("/init", json={
+        "skill_name": "nonexistent_skill",
+        "message": "hello",
+    })
+    assert r.status_code == 404
+    assert "not found" in r.json()["detail"].lower()
+
+
+def test_init_rejects_empty_criteria():
+    """Init handler returns configuring when LLM extracts empty criteria."""
+    from skills.hackathon_novelty.init import hackathon_init_handler
+    from unittest.mock import patch
+
+    class _FakeLLM:
+        def invoke(self, messages):
+            class _Resp:
+                content = '{"ready": true, "criteria": {}, "guidelines": "", "threshold": 5}'
+            return _Resp()
+
+    with patch("skills.hackathon_novelty.init.get_llm", return_value=_FakeLLM()):
+        result = hackathon_init_handler("use empty criteria", [])
+    assert result["status"] == "configuring"
+    assert "empty" in result["message"].lower() or "criterion" in result["message"].lower()
+
+
+def test_init_rejects_bad_weight_sum():
+    """Init handler returns configuring when criteria weights don't sum to ~1.0."""
+    from skills.hackathon_novelty.init import hackathon_init_handler
+    from unittest.mock import patch
+
+    class _FakeLLM:
+        def invoke(self, messages):
+            class _Resp:
+                content = '{"ready": true, "criteria": {"a": 0.3, "b": 0.3}, "guidelines": "", "threshold": 5}'
+            return _Resp()
+
+    with patch("skills.hackathon_novelty.init.get_llm", return_value=_FakeLLM()):
+        result = hackathon_init_handler("bad weights", [])
+    assert result["status"] == "configuring"
+    assert "1.0" in result["message"] or "sum" in result["message"].lower()
+
+
+def test_init_rejects_non_numeric_threshold():
+    """Init handler returns configuring when threshold is non-numeric."""
+    from skills.hackathon_novelty.init import hackathon_init_handler
+    from unittest.mock import patch
+
+    class _FakeLLM:
+        def invoke(self, messages):
+            class _Resp:
+                content = '{"ready": true, "criteria": {"a": 0.5, "b": 0.5}, "guidelines": "", "threshold": "five"}'
+            return _Resp()
+
+    with patch("skills.hackathon_novelty.init.get_llm", return_value=_FakeLLM()):
+        result = hackathon_init_handler("bad threshold", [])
+    assert result["status"] == "configuring"
+    assert "threshold" in result["message"].lower()

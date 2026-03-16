@@ -83,7 +83,10 @@ async def init_instance(body: InitRequest):
     Returns status='configuring' (skill needs more info) or status='ready' (tokens issued).
     """
     if body.instance_id is None:
-        card = _skill_router.get_card(body.skill_name)
+        try:
+            card = _skill_router.get_card(body.skill_name)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"Skill '{body.skill_name}' not found")
         if card.init_handler is None:
             raise HTTPException(status_code=400, detail=f"Skill '{body.skill_name}' does not support conversational setup")
         instance_id = str(uuid.uuid4())
