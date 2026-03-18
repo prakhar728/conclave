@@ -133,13 +133,27 @@ def triage_node(state: AgentState) -> dict:
         duplicate_threshold=SIMILARITY_DUPLICATE_THRESHOLD,
         novelty_threshold=LOW_NOVELTY_THRESHOLD,
     )
-    submissions_str = ", ".join(state["submission_ids"])
-    human_msg = f"Classify these submissions: {submissions_str}"
+
+    # Include precomputed triage context so the LLM has rich signals upfront
+    context_lines = []
+    for sid, ctx in state["triage_context"].items():
+        context_lines.append(
+            f"  {sid}: novelty={ctx['novelty_score']:.3f}, percentile={ctx['percentile']:.1f}, "
+            f"cluster={ctx['cluster']} (size {ctx['cluster_size']}), "
+            f"has_repo={ctx['has_repo']}, has_deck={ctx['has_deck']}"
+        )
+    context_str = "\n".join(context_lines)
+    human_msg = (
+        f"Classify these submissions:\n{context_str}\n\n"
+        "Use triage tools for deeper investigation if needed, then output your classifications."
+    )
 
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=human_msg)]
 
     # Tool loop for triage
-    while True:
+    max_iterations = 5
+    iteration = 0
+    while iteration < max_iterations:
         response = llm.invoke(messages)
         messages.append(response)
         if not (hasattr(response, "tool_calls") and response.tool_calls):
@@ -148,6 +162,7 @@ def triage_node(state: AgentState) -> dict:
         tool_node = ToolNode(TRIAGE_TOOLS)
         tool_results = tool_node.invoke({"messages": messages})
         messages.extend(tool_results["messages"])
+        iteration += 1
 
     # Parse classifications from final response
     classifications = _parse_classifications(
@@ -212,7 +227,9 @@ def quick_node(state: AgentState) -> dict:
 
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=human_msg)]
 
-    while True:
+    max_iterations = 10
+    iteration = 0
+    while iteration < max_iterations:
         response = llm.invoke(messages)
         messages.append(response)
         if not (hasattr(response, "tool_calls") and response.tool_calls):
@@ -220,6 +237,7 @@ def quick_node(state: AgentState) -> dict:
         tool_node = ToolNode(ANALYSIS_TOOLS)
         tool_results = tool_node.invoke({"messages": messages})
         messages.extend(tool_results["messages"])
+        iteration += 1
 
     parsed = _parse_agent_results(response.content, state["quick_ids"], state["criteria"])
     results = list(state.get("results", []))
