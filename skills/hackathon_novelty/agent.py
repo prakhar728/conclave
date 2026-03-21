@@ -41,7 +41,10 @@ from langgraph.prebuilt import ToolNode
 
 from config import get_llm
 from skills.hackathon_novelty.tools import TRIAGE_TOOLS, ANALYSIS_TOOLS, ALL_TOOLS
-from skills.hackathon_novelty.config import SIMILARITY_DUPLICATE_THRESHOLD, LOW_NOVELTY_THRESHOLD
+from skills.hackathon_novelty.config import (
+    SIMILARITY_DUPLICATE_THRESHOLD, LOW_NOVELTY_THRESHOLD,
+    TRIAGE_MODEL, QUICK_MODEL, ANALYZE_MODEL,
+)
 
 
 # --- Prompt version constants ---
@@ -141,7 +144,7 @@ to all submissions unless their content is genuinely identical.
 
 def triage_node(state: AgentState) -> dict:
     """LLM node: classify each submission using triage tools."""
-    llm = get_llm().bind_tools(TRIAGE_TOOLS)
+    llm = get_llm(TRIAGE_MODEL).bind_tools(TRIAGE_TOOLS)
 
     system_prompt = TRIAGE_SYSTEM_PROMPT.format(
         duplicate_threshold=SIMILARITY_DUPLICATE_THRESHOLD,
@@ -231,7 +234,7 @@ def quick_node(state: AgentState) -> dict:
     if not state["quick_ids"]:
         return {}
 
-    llm = get_llm().bind_tools(ANALYSIS_TOOLS)
+    llm = get_llm(QUICK_MODEL).bind_tools(ANALYSIS_TOOLS)
     criteria_str = "\n".join(f"- {k}: weight {v}" for k, v in state["criteria"].items())
     system_prompt = QUICK_SYSTEM_PROMPT.format(
         criteria=criteria_str, guidelines=state["guidelines"]
@@ -263,7 +266,7 @@ def analyze_node(state: AgentState) -> dict:
     if not state["analyze_ids"]:
         return {}
 
-    llm = get_llm().bind_tools(ALL_TOOLS)
+    llm = get_llm(ANALYZE_MODEL).bind_tools(ALL_TOOLS)
     criteria_str = "\n".join(f"- {k}: weight {v}" for k, v in state["criteria"].items())
     system_prompt = ANALYZE_SYSTEM_PROMPT.format(
         criteria=criteria_str, guidelines=state["guidelines"]

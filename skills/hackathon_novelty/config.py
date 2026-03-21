@@ -8,12 +8,15 @@ What to edit here:
 - MIN_SUBMISSIONS: minimum batch size for analysis to run
 - SIMILARITY_DUPLICATE_THRESHOLD: guidance value passed to triage LLM prompt (not a hard cutoff)
 - LOW_NOVELTY_THRESHOLD: guidance value passed to triage LLM prompt (not a hard cutoff)
+- *_MODEL: per-node model overrides (set via CONCLAVE_*_MODEL env vars)
 
 Consumed by:
 - guardrails.py (ALLOWED_OUTPUT_KEYS, SCORE_BOUNDS, MIN_LEAKAGE_SUBSTRING_LENGTH)
 - __init__.py (MIN_SUBMISSIONS, ALLOWED_OUTPUT_KEYS via skill_card)
 - agent.py (SIMILARITY_DUPLICATE_THRESHOLD, LOW_NOVELTY_THRESHOLD in triage prompt)
+- agent.py + init.py (*_MODEL constants)
 """
+import os
 
 ALLOWED_OUTPUT_KEYS = {
     "submission_id",
@@ -40,3 +43,11 @@ MIN_SUBMISSIONS = 5
 # material availability, similarity patterns) before making its classification decision.
 SIMILARITY_DUPLICATE_THRESHOLD = 0.95
 LOW_NOVELTY_THRESHOLD = 0.1
+
+# Per-node model overrides — set via CONCLAVE_*_MODEL env vars.
+# Empty string falls back to CONCLAVE_DEFAULT_MODEL (or DeepSeek-V3.1 if unset).
+_default = os.environ.get("CONCLAVE_DEFAULT_MODEL", "deepseek-ai/DeepSeek-V3.1")
+INIT_MODEL    = os.environ.get("CONCLAVE_INIT_MODEL")    or _default
+TRIAGE_MODEL  = os.environ.get("CONCLAVE_TRIAGE_MODEL")  or _default
+QUICK_MODEL   = os.environ.get("CONCLAVE_QUICK_MODEL")   or _default
+ANALYZE_MODEL = os.environ.get("CONCLAVE_ANALYZE_MODEL") or _default

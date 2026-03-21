@@ -25,7 +25,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from config import get_llm
 from core.models import OperatorConfig
-from skills.hackathon_novelty.config import MIN_SUBMISSIONS
+from skills.hackathon_novelty.config import MIN_SUBMISSIONS, INIT_MODEL
 
 
 # Bump when changing _SYSTEM_PROMPT. Flows into LangSmith traces and eval logs.
@@ -87,7 +87,7 @@ def hackathon_init_handler(message: str, conversation: list[dict]) -> dict:
         else:
             lc_messages.append(AIMessage(content=msg["content"]))
 
-    llm = get_llm()
+    llm = get_llm(INIT_MODEL)
     response = llm.invoke(lc_messages)
     ai_text = response.content
 
