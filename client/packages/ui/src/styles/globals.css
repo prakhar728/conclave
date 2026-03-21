@@ -1,0 +1,219 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+@source "../../../apps/**/*.{ts,tsx}";
+@source "../../../components/**/*.{ts,tsx}";
+@source "../**/*.{ts,tsx}";
+
+/*
+ * NDAI Apple-Inspired Light Theme
+ * Design reference: apple.com aesthetic — clean, premium, restrained
+ * Violet accent used sparingly for CTAs and active states
+ */
+:root {
+  /* Page backgrounds */
+  --background: #ffffff;
+  --foreground: #1d1d1f;
+
+  /* Cards / surfaces */
+  --card: #ffffff;
+  --card-foreground: #1d1d1f;
+  --popover: #ffffff;
+  --popover-foreground: #1d1d1f;
+
+  /* Primary accent — violet */
+  --primary: #6e3ff3;
+  --primary-foreground: #ffffff;
+
+  /* Secondary — Apple gray for less prominent elements */
+  --secondary: #f5f5f7;
+  --secondary-foreground: #1d1d1f;
+
+  /* Muted — section alternate bg */
+  --muted: #f5f5f7;
+  --muted-foreground: #6e6e73;
+
+  /* Accent */
+  --accent: #f5f5f7;
+  --accent-foreground: #1d1d1f;
+
+  /* Destructive */
+  --destructive: #ff3b30;
+
+  /* Borders */
+  --border: #d2d2d7;
+  --input: #e8e8ed;
+  --ring: #6e3ff3;
+
+  /* Radius — Apple's rounded aesthetic */
+  --radius: 0.75rem;
+
+  /* Semantic colors */
+  --success: #34c759;
+  --warning: #ff9f0a;
+  --glow: #6e3ff3;
+
+  /* Monospace elements */
+  --mono-bg: #f5f5f7;
+  --mono-text: #1d1d1f;
+
+  /* Charts */
+  --chart-1: #6e3ff3;
+  --chart-2: #5a2fd4;
+  --chart-3: #34c759;
+  --chart-4: #ff9f0a;
+  --chart-5: #ff3b30;
+
+  /* Sidebar */
+  --sidebar: #f5f5f7;
+  --sidebar-foreground: #1d1d1f;
+  --sidebar-primary: #6e3ff3;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e8e8ed;
+  --sidebar-accent-foreground: #1d1d1f;
+  --sidebar-border: #d2d2d7;
+  --sidebar-ring: #6e3ff3;
+}
+
+/* Dark variant — matching values for consistency */
+.dark {
+  --background: #ffffff;
+  --foreground: #1d1d1f;
+  --card: #ffffff;
+  --card-foreground: #1d1d1f;
+  --popover: #ffffff;
+  --popover-foreground: #1d1d1f;
+  --primary: #6e3ff3;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f5f7;
+  --secondary-foreground: #1d1d1f;
+  --muted: #f5f5f7;
+  --muted-foreground: #6e6e73;
+  --accent: #f5f5f7;
+  --accent-foreground: #1d1d1f;
+  --destructive: #ff3b30;
+  --border: #d2d2d7;
+  --input: #e8e8ed;
+  --ring: #6e3ff3;
+  --success: #34c759;
+  --warning: #ff9f0a;
+  --glow: #6e3ff3;
+  --mono-bg: #f5f5f7;
+  --mono-text: #1d1d1f;
+  --chart-1: #6e3ff3;
+  --chart-2: #5a2fd4;
+  --chart-3: #34c759;
+  --chart-4: #ff9f0a;
+  --chart-5: #ff3b30;
+  --sidebar: #f5f5f7;
+  --sidebar-foreground: #1d1d1f;
+  --sidebar-primary: #6e3ff3;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e8e8ed;
+  --sidebar-accent-foreground: #1d1d1f;
+  --sidebar-border: #d2d2d7;
+  --sidebar-ring: #6e3ff3;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-glow: var(--glow);
+  --color-mono-bg: var(--mono-bg);
+  --color-mono-text: var(--mono-text);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-mono: var(--font-mono);
+  /* Apple section alternate bg as a custom utility */
+  --color-section-alt: #f5f5f7;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "ss02", "cv01", "cv02";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); opacity: 0.15; }
+  50% { transform: translateY(-20px); opacity: 0.05; }
+}
+
+@keyframes verified-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.3); }
+  50% { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0); }
+}
+
+@layer utilities {
+  .animate-float {
+    animation: float var(--duration, 10s) ease-in-out infinite;
+  }
+  .animate-verified-pulse {
+    animation: verified-pulse 2s ease-in-out infinite;
+  }
+  /* Apple-style hover shadow */
+  .hover-lift {
+    transition: box-shadow 0.3s ease, transform 0.3s ease;
+  }
+  .hover-lift:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+  }
+  .mono-badge {
+    font-family: var(--font-mono);
+    background: var(--mono-bg);
+    color: var(--mono-text);
+    @apply text-xs px-2 py-0.5 rounded-lg;
+  }
+  /* Apple tight tracking for headlines */
+  .tracking-apple-tight {
+    letter-spacing: -0.04em;
+  }
+  .tracking-apple {
+    letter-spacing: -0.02em;
+  }
+}
