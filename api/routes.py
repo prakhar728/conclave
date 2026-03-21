@@ -255,3 +255,51 @@ def get_skill(skill_name: str):
         return _skill_router.get_card(skill_name).metadata()
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found")
+
+
+@router.get("/attestation")
+def attestation(nonce: str = ""):
+    """Return the TDX attestation quote for this enclave instance."""
+    from infra.enclave import get_attestation_quote
+    quote = get_attestation_quote(nonce=nonce)
+    return {
+        "quote": quote,
+        "verify_url": "https://cloud-api.phala.network/api/v1/attestations/verify",
+    }
+
+
+@router.post("/fetch-repo")
+async def fetch_repo(body: dict, request: Request):
+    """
+    Fetch a GitHub repo summary inside the TEE.
+    Accepts a public repo URL (no auth) or triggers GitHub App flow for private repos.
+    Input:  {"repo_url": "https://github.com/owner/repo"}
+    Output: {"repo_summary": "..."}
+    """
+    _resolve_token(request)
+
+    repo_url = body.get("repo_url", "").strip()
+    if not repo_url:
+        raise HTTPException(status_code=422, detail="repo_url is required")
+
+    import os
+    from infra.github_app import fetch_public_repo_summary, fetch_repo_summary
+
+    app_id = os.environ.get("GITHUB_APP_ID")
+    installation_id = os.environ.get("GITHUB_APP_INSTALLATION_ID")
+
+    loop = asyncio.get_event_loop()
+    try:
+        if app_id and installation_id:
+            summary = await loop.run_in_executor(
+                None, fetch_repo_summary, repo_url, app_id, installation_id
+            )
+        else:
+            # GitHub App not configured — fall back to public repo fetch
+            summary = await loop.run_in_executor(
+                None, fetch_public_repo_summary, repo_url
+            )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"GitHub fetch failed: {e}")
+
+    return {"repo_summary": summary}
