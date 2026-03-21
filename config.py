@@ -3,12 +3,18 @@ from typing import Literal
 
 
 class Settings(BaseSettings):
-    llm_provider: Literal["openai", "anthropic", "google"] = "openai"
+    llm_provider: Literal["openai", "anthropic", "google", "nearai"] = "openai"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
     anthropic_api_key: str = ""
     google_api_key: str = ""
+    nearai_api_key: str = ""
+    nearai_model: str = "deepseek-ai/DeepSeek-V3.1"
     embedding_model: str = "all-MiniLM-L6-v2"
+
+    # Supabase auth (optional — if unset, /auth/* endpoints return 503 and /register is the fallback)
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
 
     model_config = {"env_prefix": "CONCLAVE_", "env_file": ".env", "extra": "ignore"}
 
@@ -27,3 +33,8 @@ def get_llm():
     elif settings.llm_provider == "google":
         from langchain_google_genai import ChatGoogleGenerativeAI
         return ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=settings.google_api_key)
+    elif settings.llm_provider == "nearai":
+        from langchain_nearai import ChatNearAI
+        return ChatNearAI(model=settings.nearai_model, api_key=settings.nearai_api_key)
+    else:
+        raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")

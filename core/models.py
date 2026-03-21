@@ -43,4 +43,3 @@ class InitResponse(BaseModel):
     status: str                              # "configuring" | "ready"
     message: str                             # LLM response (question or confirmation)
     admin_token: Optional[str] = None     # only when status="ready"
-    user_token: Optional[str] = None      # only when status="ready"

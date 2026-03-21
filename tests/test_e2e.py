@@ -74,10 +74,10 @@ def _make_init_handler():
     return handler
 
 
-# NOTE — Shared user_token limitation (accepted scope for hackathon):
-# All participants in an instance share a single user_token. Any participant who learns
-# another's submission_id can read their result. Per-user token isolation is Person A's
-# auth domain and is deferred until the external auth layer is built.
+# NOTE — Per-user token isolation:
+# Each participant registers via POST /register to receive a unique user token.
+# Ownership (token → submission_ids) is tracked inside the TEE.
+# GET /results/{id} returns 403 if the token did not submit that submission_id.
 
 # --- Fixtures ---
 
@@ -88,6 +88,7 @@ def clear_stores():
     routes._submissions.clear()
     routes._results.clear()
     routes._tokens.clear()
+    routes._registrations.clear()
     yield
 
 
@@ -125,7 +126,7 @@ def test_operator_init_loop(client):
         body = r.json()
         assert body["status"] == "ready"
         assert body["admin_token"] is not None
-        assert body["user_token"] is not None
+        assert "user_token" not in body
         assert body["instance_id"] == instance_id
 
 
@@ -148,6 +149,9 @@ def test_full_e2e_workflow(client):
             "instance_id": instance_id,
         })
         admin_token = r.json()["admin_token"]
+
+        r = client.post("/register", json={"instance_id": instance_id})
+        assert r.status_code == 200
         user_token = r.json()["user_token"]
 
         # Step 3: Submit 4 times — all below threshold
@@ -205,7 +209,9 @@ def test_token_enforcement(client):
             "instance_id": instance_id,
         })
         admin_token = r.json()["admin_token"]
-        user_token = r.json()["user_token"]
+
+    r = client.post("/register", json={"instance_id": instance_id})
+    user_token = r.json()["user_token"]
 
     # No token → 401
     r = client.post("/submit", json={"submission_id": "s1", "idea_text": "idea"})
@@ -247,7 +253,10 @@ def test_result_not_found_before_pipeline(client):
             "message": "ready",
             "instance_id": instance_id,
         })
-        user_token = r.json()["user_token"]
+        instance_id = r.json()["instance_id"]
+
+    r = client.post("/register", json={"instance_id": instance_id})
+    user_token = r.json()["user_token"]
 
     r = client.get("/results/sub_001", headers={"X-Instance-Token": user_token})
     assert r.status_code == 404
@@ -410,8 +419,10 @@ def test_retrigger_on_6th_submission(client):
             "message": "ready",
             "instance_id": instance_id,
         })
-        user_token = r.json()["user_token"]
         admin_token = r.json()["admin_token"]
+
+        r = client.post("/register", json={"instance_id": instance_id})
+        user_token = r.json()["user_token"]
 
         for i in range(1, 6):
             client.post(
@@ -444,7 +455,10 @@ def test_submit_missing_submission_id_returns_422(client):
             "message": "ready",
             "instance_id": instance_id,
         })
-        user_token = r.json()["user_token"]
+        instance_id = r.json()["instance_id"]
+
+    r = client.post("/register", json={"instance_id": instance_id})
+    user_token = r.json()["user_token"]
 
     r = client.post(
         "/submit",
@@ -452,3 +466,48 @@ def test_submit_missing_submission_id_returns_422(client):
         headers={"X-Instance-Token": user_token},
     )
     assert r.status_code == 422
+
+
+def test_cross_user_result_isolation(client):
+    """User A cannot read User B's result even if they know the submission_id."""
+    handler = _make_init_handler()
+    with patch.object(skill_card, "init_handler", handler), \
+         patch.object(skill_card, "run", _fake_run_skill):
+        r = client.post("/init", json={"skill_name": "hackathon_novelty", "message": "start"})
+        instance_id = r.json()["instance_id"]
+        r = client.post("/init", json={
+            "skill_name": "hackathon_novelty",
+            "message": "ready",
+            "instance_id": instance_id,
+        })
+
+        # Two distinct users register
+        token_a = client.post("/register", json={"instance_id": instance_id}).json()["user_token"]
+        token_b = client.post("/register", json={"instance_id": instance_id}).json()["user_token"]
+
+        # Submit enough to trigger pipeline (5 total, split across users)
+        for i in range(1, 5):
+            client.post(
+                "/submit",
+                json={"submission_id": f"sub_00{i}", "idea_text": f"Idea {i}"},
+                headers={"X-Instance-Token": token_a},
+            )
+        # User B's submission triggers the pipeline
+        r = client.post(
+            "/submit",
+            json={"submission_id": "sub_005", "idea_text": "User B's idea"},
+            headers={"X-Instance-Token": token_b},
+        )
+        assert r.json()["status"] == "received_analysis_complete"
+
+        # User B can read their own result
+        r = client.get("/results/sub_005", headers={"X-Instance-Token": token_b})
+        assert r.status_code == 200
+
+        # User B cannot read User A's result even knowing the submission_id
+        r = client.get("/results/sub_001", headers={"X-Instance-Token": token_b})
+        assert r.status_code == 403
+
+        # User A cannot read User B's result
+        r = client.get("/results/sub_005", headers={"X-Instance-Token": token_a})
+        assert r.status_code == 403

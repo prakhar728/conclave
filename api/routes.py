@@ -22,7 +22,11 @@ _results: dict[str, dict] = {}
 # instance_id -> {submission_id -> result_dict}
 
 _tokens: dict[str, dict] = {}
-# token_string -> {instance_id, role}
+# token_string -> {instance_id, role, submission_ids: set[str]}
+
+_registrations: dict[str, dict] = {}
+# instance_id -> {supabase_user_id -> token_string}
+# prevents a single Supabase identity from registering twice for the same instance
 
 _skill_router = SkillRouter()
 
@@ -122,16 +126,13 @@ async def init_instance(body: InitRequest):
         inst["threshold"] = result.get("threshold", inst["threshold"])
 
         admin_token = secrets.token_urlsafe(16)
-        user_token = secrets.token_urlsafe(16)
-        _tokens[admin_token] = {"instance_id": instance_id, "role": "admin"}
-        _tokens[user_token] = {"instance_id": instance_id, "role": "user"}
+        _tokens[admin_token] = {"instance_id": instance_id, "role": "admin", "submission_ids": set()}
 
         return InitResponse(
             instance_id=instance_id,
             status="ready",
             message=result["message"],
             admin_token=admin_token,
-            user_token=user_token,
         )
 
     return InitResponse(
@@ -139,6 +140,85 @@ async def init_instance(body: InitRequest):
         status="configuring",
         message=result["message"],
     )
+
+
+@router.post("/register")
+def register_user(body: dict):
+    """
+    Issue a unique user token for a specific instance.
+    Participants call this with the instance_id provided by the operator.
+    Each call returns a fresh token — ownership of submitted results is tracked per token.
+    """
+    instance_id = body.get("instance_id", "").strip()
+    if not instance_id or instance_id not in _instances:
+        raise HTTPException(status_code=404, detail="Instance not found")
+    token = secrets.token_urlsafe(16)
+    _tokens[token] = {"instance_id": instance_id, "role": "user", "submission_ids": set()}
+    return {"user_token": token}
+
+
+@router.post("/auth/send-otp")
+def auth_send_otp(body: dict):
+    """
+    Step 1 of Supabase OTP login.
+    Send a one-time password to the participant's email address.
+    Requires CONCLAVE_SUPABASE_* env vars to be configured.
+    """
+    from infra.supabase_auth import send_otp, supabase_enabled
+    if not supabase_enabled():
+        raise HTTPException(status_code=503, detail="Supabase auth is not configured on this instance")
+
+    email = (body.get("email") or "").strip()
+    instance_id = (body.get("instance_id") or "").strip()
+
+    if not email:
+        raise HTTPException(status_code=422, detail="email is required")
+    if not instance_id or instance_id not in _instances:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    try:
+        send_otp(email)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to send OTP: {e}")
+
+    return {"status": "otp_sent", "email": email}
+
+
+@router.post("/auth/verify-otp")
+def auth_verify_otp(body: dict):
+    """
+    Step 2 of Supabase OTP login.
+    Verify the OTP, validate the returned JWT locally, and issue an internal user token.
+    Idempotent: the same Supabase identity gets the same token for a given instance.
+    """
+    from infra.supabase_auth import verify_otp, supabase_enabled
+    if not supabase_enabled():
+        raise HTTPException(status_code=503, detail="Supabase auth is not configured on this instance")
+
+    email = (body.get("email") or "").strip()
+    token = (body.get("token") or "").strip()
+    instance_id = (body.get("instance_id") or "").strip()
+
+    if not email or not token:
+        raise HTTPException(status_code=422, detail="email and token are required")
+    if not instance_id or instance_id not in _instances:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    try:
+        supabase_user_id = verify_otp(email, token)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"OTP verification failed: {e}")
+
+    # Idempotent: return existing token if this user already registered for this instance
+    instance_reg = _registrations.setdefault(instance_id, {})
+    if supabase_user_id in instance_reg:
+        existing_token = instance_reg[supabase_user_id]
+        return {"user_token": existing_token}
+
+    user_token = secrets.token_urlsafe(16)
+    _tokens[user_token] = {"instance_id": instance_id, "role": "user", "submission_ids": set(), "supabase_user_id": supabase_user_id}
+    instance_reg[supabase_user_id] = user_token
+    return {"user_token": user_token}
 
 
 @router.get("/health")
@@ -167,6 +247,7 @@ async def submit(submission: dict, request: Request):
         raise HTTPException(status_code=422, detail="submission_id is required")
 
     _submissions[instance_id][sid] = submission
+    token_info["submission_ids"].add(sid)
     count = len(_submissions[instance_id])
     threshold = _instances[instance_id]["threshold"]
 
@@ -234,11 +315,11 @@ def get_results(submission_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Result not found or not yet available")
 
     if role == "user":
-        # Users can only retrieve their own result
-        # The submission_id path param is the identifier — no further check needed
-        # since users know their own submission_id
+        if submission_id not in token_info["submission_ids"]:
+            raise HTTPException(status_code=403, detail="Access denied: submission not owned by this token")
         return instance_results[submission_id]
 
+    # admin: unrestricted access within the instance
     return instance_results[submission_id]
 
 
