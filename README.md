@@ -111,7 +111,7 @@ No changes needed to `core/`, `api/`, or the TEE infrastructure.
 ## Running Tests
 
 ```bash
-python -m pytest tests/ -v    # 47 tests, no API keys needed
+python -m pytest tests/ -v    # 54 tests, no API keys needed
 ```
 
 CI runs automatically on every push via GitHub Actions.

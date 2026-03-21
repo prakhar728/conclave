@@ -30,6 +30,7 @@ Visualization:
 """
 from __future__ import annotations
 import json
+import operator
 import re
 from typing import TypedDict, Annotated, Optional
 
@@ -43,6 +44,13 @@ from skills.hackathon_novelty.tools import TRIAGE_TOOLS, ANALYSIS_TOOLS, ALL_TOO
 from skills.hackathon_novelty.config import SIMILARITY_DUPLICATE_THRESHOLD, LOW_NOVELTY_THRESHOLD
 
 
+# --- Prompt version constants ---
+# Bump when changing the corresponding prompt. Flows into LangSmith traces and eval logs.
+TRIAGE_PROMPT_VERSION = "v3"
+QUICK_PROMPT_VERSION = "v1"
+ANALYZE_PROMPT_VERSION = "v2"
+
+
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     submission_ids: list[str]               # all IDs being processed this run
@@ -53,7 +61,7 @@ class AgentState(TypedDict):
     flagged_ids: list[str]                 # routed to flag node
     quick_ids: list[str]                   # routed to quick node
     analyze_ids: list[str]                 # routed to analyze node
-    results: list[dict]                    # accumulated results from all branches
+    results: Annotated[list[dict], operator.add]  # merged across parallel branches
 
 
 # --- Prompts ---
@@ -63,20 +71,22 @@ Your job is to classify each submission so it gets the right depth of analysis.
 
 CLASSIFICATION OPTIONS:
 - "duplicate": The submission is substantially similar to another (same core idea, similar execution).
-  Use this when high similarity reflects copied or derivative work, NOT when two submissions
-  independently converged on the same niche domain.
-- "quick": The submission is straightforward — low novelty, minimal materials, or a well-known idea
-  with no distinctive implementation. Needs scoring but not deep content analysis.
-- "analyze": Everything else. When uncertain, always choose "analyze". Over-analyzing is cheap;
-  under-analyzing loses information.
+  Use this when similarity > {duplicate_threshold} AND the ideas are clearly derivative, NOT when two
+  submissions independently converged on the same niche domain.
+- "quick": The submission needs only a surface-level score — use this when ANY of these apply:
+    * has_repo=False AND has_deck=False (no supporting materials to analyze)
+    * The idea description is vague, generic, or under-developed (a sentence or two with no specifics)
+    * Novelty percentile < 20 AND no materials
+- "analyze": Substantive submissions with a clear idea, technical depth, or supporting materials.
+  Use this for everything that doesn't clearly fit "duplicate" or "quick".
 
-GUIDANCE (not hard cutoffs — reason about context):
-- Similarity > {duplicate_threshold}: consider "duplicate" IF the similar submission is in a large cluster.
-  If both are in a small exclusive cluster, they may have independently converged — route to "analyze".
-- Novelty < {novelty_threshold} AND no repo AND no deck: consider "quick".
-- When in doubt: "analyze".
+DECISION RULES (apply in order):
+1. If similarity to another submission > {duplicate_threshold}: "duplicate"
+2. If has_repo=False AND has_deck=False: "quick" — no exceptions. You cannot assess idea quality
+   without reading it, and reading ideas is reserved for the analyze stage.
+3. Otherwise: "analyze"
 
-Use the triage tools to gather context for each submission, then output your classifications.
+Use the provided context first. Only call triage tools if you need more information.
 
 REQUIRED OUTPUT FORMAT (JSON object, one key per submission_id):
 {{"sub_001": "analyze", "sub_002": "duplicate", "sub_003": "quick", ...}}
@@ -118,8 +128,12 @@ For each submission:
 4. Call score_criterion for each criterion, then produce your 0-10 score
 5. You may call get_similar_submissions if you want comparative context
 
-Respond with a JSON array:
+When you have read and scored all submissions, output ONLY a raw JSON array with no markdown fences,
+no prose, no explanation — just the JSON:
 [{{"submission_id": "...", "criteria_scores": {{"criterion_name": score, ...}}}}, ...]
+
+Scores must differ across submissions that have different content — do not assign the same scores
+to all submissions unless their content is genuinely identical.
 """
 
 
@@ -133,13 +147,27 @@ def triage_node(state: AgentState) -> dict:
         duplicate_threshold=SIMILARITY_DUPLICATE_THRESHOLD,
         novelty_threshold=LOW_NOVELTY_THRESHOLD,
     )
-    submissions_str = ", ".join(state["submission_ids"])
-    human_msg = f"Classify these submissions: {submissions_str}"
+
+    # Include precomputed triage context so the LLM has rich signals upfront
+    context_lines = []
+    for sid, ctx in state["triage_context"].items():
+        context_lines.append(
+            f"  {sid}: novelty={ctx['novelty_score']:.3f}, percentile={ctx['percentile']:.1f}, "
+            f"cluster={ctx['cluster']} (size {ctx['cluster_size']}), "
+            f"has_repo={ctx['has_repo']}, has_deck={ctx['has_deck']}"
+        )
+    context_str = "\n".join(context_lines)
+    human_msg = (
+        f"Classify these submissions:\n{context_str}\n\n"
+        "Use triage tools for deeper investigation if needed, then output your classifications."
+    )
 
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=human_msg)]
 
     # Tool loop for triage
-    while True:
+    max_iterations = 5
+    iteration = 0
+    while iteration < max_iterations:
         response = llm.invoke(messages)
         messages.append(response)
         if not (hasattr(response, "tool_calls") and response.tool_calls):
@@ -148,6 +176,7 @@ def triage_node(state: AgentState) -> dict:
         tool_node = ToolNode(TRIAGE_TOOLS)
         tool_results = tool_node.invoke({"messages": messages})
         messages.extend(tool_results["messages"])
+        iteration += 1
 
     # Parse classifications from final response
     classifications = _parse_classifications(
@@ -176,7 +205,7 @@ def flag_node(state: AgentState) -> dict:
     ids = _deterministic_results.get("submission_ids", [])
     sim_matrix = _deterministic_results.get("sim_matrix", None)
 
-    results = list(state.get("results", []))
+    results = []
     for sid in state["flagged_ids"]:
         # Find most similar submission (the "original")
         duplicate_of = None
@@ -212,7 +241,9 @@ def quick_node(state: AgentState) -> dict:
 
     messages = [SystemMessage(content=system_prompt), HumanMessage(content=human_msg)]
 
-    while True:
+    max_iterations = 10
+    iteration = 0
+    while iteration < max_iterations:
         response = llm.invoke(messages)
         messages.append(response)
         if not (hasattr(response, "tool_calls") and response.tool_calls):
@@ -220,11 +251,10 @@ def quick_node(state: AgentState) -> dict:
         tool_node = ToolNode(ANALYSIS_TOOLS)
         tool_results = tool_node.invoke({"messages": messages})
         messages.extend(tool_results["messages"])
+        iteration += 1
 
     parsed = _parse_agent_results(response.content, state["quick_ids"], state["criteria"])
-    results = list(state.get("results", []))
-    for r in parsed:
-        results.append({**r, "status": "quick_scored", "analysis_depth": "quick"})
+    results = [{**r, "status": "quick_scored", "analysis_depth": "quick"} for r in parsed]
     return {"messages": messages, "results": results}
 
 
@@ -257,27 +287,25 @@ def analyze_node(state: AgentState) -> dict:
         iteration += 1
 
     parsed = _parse_agent_results(response.content, state["analyze_ids"], state["criteria"])
-    results = list(state.get("results", []))
-    for r in parsed:
-        results.append({**r, "status": "analyzed", "analysis_depth": "full"})
+    results = [{**r, "status": "analyzed", "analysis_depth": "full"} for r in parsed]
     return {"messages": messages, "results": results}
 
 
 def finalize_node(state: AgentState) -> dict:
     """Deterministic node: ensure all submission IDs have a result entry."""
-    results = list(state.get("results", []))
-    processed = {r["submission_id"] for r in results}
+    processed = {r["submission_id"] for r in state["results"]}
     # Safety net: any submission that fell through gets a default
+    fallbacks = []
     for sid in state["submission_ids"]:
         if sid not in processed:
-            results.append({
+            fallbacks.append({
                 "submission_id": sid,
                 "criteria_scores": {c: 5.0 for c in state["criteria"]},
                 "status": "analyzed",
                 "analysis_depth": "full",
                 "duplicate_of": None,
             })
-    return {"results": results}
+    return {"results": fallbacks}
 
 
 # --- Graph builder ---
@@ -347,7 +375,14 @@ def run_agent(
         "results": [],
     }
 
-    final_state = graph.invoke(initial_state, config={"recursion_limit": 100})
+    final_state = graph.invoke(initial_state, config={
+        "recursion_limit": 100,
+        "metadata": {
+            "triage_prompt": TRIAGE_PROMPT_VERSION,
+            "quick_prompt": QUICK_PROMPT_VERSION,
+            "analyze_prompt": ANALYZE_PROMPT_VERSION,
+        },
+    })
     return final_state["results"]
 
 
