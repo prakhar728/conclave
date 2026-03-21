@@ -9,6 +9,7 @@ dist/
 build/
 .pytest_cache/
 venv/
+.venv/
 .mcp.json
 /plan
 eval_results/
