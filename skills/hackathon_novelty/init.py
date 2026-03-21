@@ -28,6 +28,10 @@ from core.models import OperatorConfig
 from skills.hackathon_novelty.config import MIN_SUBMISSIONS
 
 
+# Bump when changing _SYSTEM_PROMPT. Flows into LangSmith traces and eval logs.
+INIT_PROMPT_VERSION = "v2"
+
+
 _SYSTEM_PROMPT = (
     "You are setting up a hackathon novelty evaluation instance. "
     "Your job is to collect the required configuration from the admin.\n\n"
@@ -37,9 +41,10 @@ _SYSTEM_PROMPT = (
     "OPTIONAL:\n"
     "- guidelines: free-text judging instructions (e.g. 'Focus on AI/ML projects')\n"
     f"- threshold: minimum submissions before auto-evaluation runs (default: {MIN_SUBMISSIONS})\n\n"
-    "Ask for missing information conversationally. "
-    "Once you have all required information, respond with ONLY this JSON and nothing else:\n"
-    '{"ready": true, "criteria": {"name": weight, ...}, "guidelines": "...", "threshold": N}'
+    "IMPORTANT: As soon as you have the required criteria (with weights summing to 1.0), "
+    "respond with ONLY the JSON below — no confirmation, no commentary, no extra text:\n"
+    '{"ready": true, "criteria": {"name": weight, ...}, "guidelines": "...", "threshold": N}\n\n'
+    "Only ask follow-up questions if the criteria are missing or weights do not sum to 1.0."
 )
 
 

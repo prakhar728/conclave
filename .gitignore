@@ -9,8 +9,6 @@ build/
 .pytest_cache/
 venv/
 .mcp.json
-plan.md
-agent-design.md
-api-plumbing-design.md
-audit-pre-commit5.md
-prompt-agent-refine.md
+/plan
+eval_results/
+scripts/

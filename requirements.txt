@@ -15,3 +15,5 @@ pytest
 httpx
 
 scipy
+pandas
+langgraph-cli[inmem]
