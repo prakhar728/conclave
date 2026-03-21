@@ -34,7 +34,11 @@ def get_llm():
         from langchain_google_genai import ChatGoogleGenerativeAI
         return ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=settings.google_api_key)
     elif settings.llm_provider == "nearai":
-        from langchain_nearai import ChatNearAI
-        return ChatNearAI(model=settings.nearai_model, api_key=settings.nearai_api_key)
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(
+            model=settings.nearai_model,
+            api_key=settings.nearai_api_key,
+            base_url="https://cloud-api.near.ai/v1",
+        )
     else:
         raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
