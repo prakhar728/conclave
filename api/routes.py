@@ -184,6 +184,50 @@ def auth_send_otp(body: dict):
     return {"status": "otp_sent", "email": email}
 
 
+@router.post("/auth/verify-token")
+def auth_verify_token(body: dict):
+    """
+    Exchange a Supabase access_token (from any OAuth provider — GitHub, Google, etc.)
+    for an internal user_token. Validates the JWT locally via JWKS (ES256).
+    Idempotent: same Supabase identity returns the same token per instance.
+    """
+    from infra.supabase_auth import supabase_enabled, _get_public_key
+    import jwt as pyjwt
+
+    if not supabase_enabled():
+        raise HTTPException(status_code=503, detail="Supabase auth is not configured on this instance")
+
+    access_token = (body.get("access_token") or "").strip()
+    instance_id = (body.get("instance_id") or "").strip()
+
+    if not access_token:
+        raise HTTPException(status_code=422, detail="access_token is required")
+    if not instance_id or instance_id not in _instances:
+        raise HTTPException(status_code=404, detail="Instance not found")
+
+    try:
+        header = pyjwt.get_unverified_header(access_token)
+        kid = header.get("kid")
+        if not kid:
+            raise ValueError("JWT missing kid")
+        public_key = _get_public_key(kid)
+        payload = pyjwt.decode(access_token, public_key, algorithms=["ES256"], audience="authenticated")
+        supabase_user_id = payload.get("sub")
+        if not supabase_user_id:
+            raise ValueError("JWT missing sub")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Token validation failed: {e}")
+
+    instance_reg = _registrations.setdefault(instance_id, {})
+    if supabase_user_id in instance_reg:
+        return {"user_token": instance_reg[supabase_user_id]}
+
+    user_token = secrets.token_urlsafe(16)
+    _tokens[user_token] = {"instance_id": instance_id, "role": "user", "submission_ids": set(), "supabase_user_id": supabase_user_id}
+    instance_reg[supabase_user_id] = user_token
+    return {"user_token": user_token}
+
+
 @router.post("/auth/verify-otp")
 def auth_verify_otp(body: dict):
     """
@@ -221,6 +265,28 @@ def auth_verify_otp(body: dict):
     return {"user_token": user_token}
 
 
+@router.get("/me")
+def get_me(request: Request):
+    """Resolve an admin or user token to its instance_id and role."""
+    token_info = _resolve_token(request)
+    return {"instance_id": token_info["instance_id"], "role": token_info["role"]}
+
+
+@router.get("/instances/{instance_id}")
+def get_instance(instance_id: str):
+    """Check if an instance exists. Used by the frontend to validate a participant URL."""
+    if instance_id not in _instances:
+        raise HTTPException(status_code=404, detail="Instance not found or expired")
+    inst = _instances[instance_id]
+    return {
+        "instance_id": instance_id,
+        "skill_name": inst["skill_name"],
+        "triggered": inst["triggered"],
+        "submissions": len(_submissions.get(instance_id, {})),
+        "threshold": inst["threshold"],
+    }
+
+
 @router.get("/health")
 def health():
     total_subs = sum(len(s) for s in _submissions.values())
@@ -242,9 +308,8 @@ async def submit(submission: dict, request: Request):
     token_info = _resolve_token(request)
     instance_id = token_info["instance_id"]
 
-    sid = submission.get("submission_id")
-    if not sid:
-        raise HTTPException(status_code=422, detail="submission_id is required")
+    sid = submission.get("submission_id") or str(uuid.uuid4())
+    submission["submission_id"] = sid  # ensure stored dict always has the id
 
     _submissions[instance_id][sid] = submission
     token_info["submission_ids"].add(sid)
@@ -270,6 +335,13 @@ async def submit(submission: dict, request: Request):
         "submissions_count": count,
         "threshold": threshold,
     }
+
+
+@router.get("/my-submissions")
+def get_my_submissions(request: Request):
+    """Return the submission IDs owned by the calling token."""
+    token_info = _resolve_token(request)
+    return {"submission_ids": list(token_info["submission_ids"])}
 
 
 @router.post("/trigger")

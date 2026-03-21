@@ -12,7 +12,7 @@ import {
 } from "@phosphor-icons/react"
 import { AttestationWidget } from "@/components/attestation-widget"
 import { EnclaveSigBadge } from "@/components/enclave-sig-badge"
-import { api } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
 import type { NoveltyResult, SubmitResponse } from "@/lib/types"
 import { cn } from "@workspace/ui/lib/utils"
 import { Suspense } from "react"
@@ -20,9 +20,27 @@ import { Suspense } from "react"
 
 type PageState = "login" | "attest" | "form" | "pending" | "results"
 
+const TOKEN_CACHE_KEY = (instanceId: string) => `conclave_user_token_${instanceId}`
+
 function ParticipantContent({ id }: { id: string }) {
   const [pageState, setPageState] = React.useState<PageState>("login")
   const [userToken, setUserToken] = React.useState("")
+  const [instanceMissing, setInstanceMissing] = React.useState(false)
+  const [toast, setToast] = React.useState<string | null>(null)
+
+  function showToast(msg: string) {
+    setToast(msg)
+    setTimeout(() => setToast(null), 4000)
+  }
+
+  function handleAuthError(err: unknown) {
+    if (err instanceof ApiError && err.status === 403) {
+      localStorage.removeItem(TOKEN_CACHE_KEY(id))
+      setUserToken("")
+      setPageState("login")
+      showToast("Your session has expired. Please log in again.")
+    }
+  }
 
   // --- OTP auth state ---
   const [email, setEmail] = React.useState("")
@@ -30,6 +48,72 @@ function ParticipantContent({ id }: { id: string }) {
   const [otpSent, setOtpSent] = React.useState(false)
   const [authLoading, setAuthLoading] = React.useState(false)
   const [authError, setAuthError] = React.useState("")
+
+  // After we have a user_token, check if they've already submitted.
+  // If yes, restore their submission_id and route to pending/results.
+  async function checkPriorSubmission(token: string) {
+    try {
+      const { submission_ids } = await api.getMySubmissions(token)
+      if (submission_ids.length === 0) {
+        setPageState("attest")
+        return
+      }
+      const sid = submission_ids[0]!
+      setSubmissionId(sid)
+      try {
+        const r = await api.getOwnResult(token, sid)
+        setResult(r)
+        setPageState("results")
+      } catch {
+        const inst = await api.checkInstance(id)
+        setSubmitResponse({
+          submission_id: sid,
+          status: "received_pending",
+          submissions_count: inst.submissions,
+          threshold: inst.threshold,
+        })
+        setPageState("pending")
+      }
+    } catch (err) {
+      handleAuthError(err)
+      if (!(err instanceof ApiError && err.status === 403)) {
+        setPageState("attest")
+      }
+    }
+  }
+
+  // On mount: verify the instance exists first, then restore session if cached.
+  React.useEffect(() => {
+    api.checkInstance(id).catch(() => setInstanceMissing(true))
+
+    const cached = localStorage.getItem(TOKEN_CACHE_KEY(id))
+    if (cached) {
+      setUserToken(cached)
+      checkPriorSubmission(cached)
+      return
+    }
+    // Check if returning from GitHub/Google OAuth redirect
+    import("@/lib/supabase").then(({ supabase }) => {
+      supabase.auth.getSession().then(async ({ data }) => {
+        const access_token = data.session?.access_token
+        if (!access_token) return
+        setAuthLoading(true)
+        try {
+          const { user_token } = await api.verifyToken(access_token, id)
+          saveToken(user_token)
+          await checkPriorSubmission(user_token)
+        } catch (err) {
+          handleAuthError(err)
+        }
+        setAuthLoading(false)
+      })
+    })
+  }, [id])
+
+  function saveToken(token: string) {
+    setUserToken(token)
+    localStorage.setItem(TOKEN_CACHE_KEY(id), token)
+  }
 
   async function handleSendOtp() {
     if (!email.trim()) return
@@ -50,7 +134,7 @@ function ParticipantContent({ id }: { id: string }) {
     setAuthError("")
     try {
       const { user_token } = await api.verifyOtp(email.trim(), otpCode.trim(), id)
-      setUserToken(user_token)
+      saveToken(user_token)
       setPageState("attest")
     } catch {
       setAuthError("Invalid or expired OTP. Try again.")
@@ -65,7 +149,7 @@ function ParticipantContent({ id }: { id: string }) {
   const [submitting, setSubmitting] = React.useState(false)
   const [submitResponse, setSubmitResponse] = React.useState<SubmitResponse | null>(null)
   const [result, setResult] = React.useState<NoveltyResult | null>(null)
-  const [submissionId] = React.useState(() => `sub_${Math.random().toString(36).slice(2, 9)}`)
+  const [submissionId, setSubmissionId] = React.useState("")
 
   React.useEffect(() => {
     if (pageState !== "pending" || !submitResponse || !userToken) return
@@ -98,11 +182,11 @@ function ParticipantContent({ id }: { id: string }) {
     if (!ideaText.trim() || !userToken) return
     setSubmitting(true)
     const res = await api.submit(userToken, {
-      submission_id: submissionId,
       idea_text: ideaText,
       repo_summary: repoSummary ?? "",
       deck_text: "",
     })
+    setSubmissionId(res.submission_id)
     setSubmitResponse(res)
     setSubmitting(false)
     setPageState("pending")
@@ -110,8 +194,54 @@ function ParticipantContent({ id }: { id: string }) {
 
   const canSubmit = ideaText.trim().length > 20 && !submitting
 
+  async function handleLogout() {
+    const { supabase } = await import("@/lib/supabase")
+    await supabase.auth.signOut()
+    localStorage.removeItem(TOKEN_CACHE_KEY(id))
+    setUserToken("")
+    setPageState("login")
+    setOtpSent(false)
+    setOtpCode("")
+    setEmail("")
+  }
+
+  if (instanceMissing) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center px-6">
+        <div className="max-w-sm w-full text-center space-y-4">
+          <div className="inline-flex items-center justify-center size-14 rounded-2xl bg-red-50 border border-red-100 mb-2">
+            <span className="text-2xl">⚠️</span>
+          </div>
+          <h2 className="text-xl font-bold text-[#1d1d1f] tracking-apple-tight">Instance not found</h2>
+          <p className="text-sm text-[#6e6e73]">
+            This submission link is invalid or has expired. Ask the organizer for a fresh link.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-white">
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 rounded-2xl border border-[#d2d2d7] bg-white px-5 py-3 shadow-lg text-sm text-[#1d1d1f] max-w-sm w-[calc(100%-3rem)]">
+          <span className="size-2 rounded-full bg-[#ff9f0a] shrink-0" />
+          {toast}
+        </div>
+      )}
+
+      {/* Top bar with logout */}
+      {pageState !== "login" && (
+        <div className="border-b border-[#e8e8ed] px-6 py-3 flex justify-end max-w-[680px] mx-auto">
+          <button
+            onClick={handleLogout}
+            className="text-sm text-[#6e6e73] hover:text-[#1d1d1f] transition-colors"
+          >
+            Log out
+          </button>
+        </div>
+      )}
       <div className="mx-auto max-w-[680px] px-6 py-16">
         {/* Instance header */}
         <div className="mb-12 text-center">
@@ -157,13 +287,59 @@ function ParticipantContent({ id }: { id: string }) {
           })}
         </div>
 
-        {/* Step 0: Login (Supabase OTP) */}
+        {/* Step 0: Login */}
         {pageState === "login" && (
-          <div className="space-y-5 max-w-sm mx-auto">
-            {!otpSent ? (
+          <div className="space-y-4 max-w-sm mx-auto">
+            {authLoading ? (
+              <div className="flex justify-center py-8">
+                <CircleNotch className="size-6 text-primary animate-spin" />
+              </div>
+            ) : !otpSent ? (
               <>
+                {/* GitHub */}
+                <button
+                  onClick={async () => {
+                    const { supabase } = await import("@/lib/supabase")
+                    await supabase.auth.signInWithOAuth({
+                      provider: "github",
+                      options: { redirectTo: `${window.location.origin}/i/${id}` },
+                    })
+                  }}
+                  className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-[#d2d2d7] bg-white py-3 text-sm font-medium text-[#1d1d1f] hover:border-[#aeaeb2] hover:bg-[#f5f5f7] transition-all"
+                >
+                  <GithubLogo weight="fill" className="size-4" />
+                  Continue with GitHub
+                </button>
+
+                {/* Google */}
+                <button
+                  onClick={async () => {
+                    const { supabase } = await import("@/lib/supabase")
+                    await supabase.auth.signInWithOAuth({
+                      provider: "google",
+                      options: { redirectTo: `${window.location.origin}/i/${id}` },
+                    })
+                  }}
+                  className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-[#d2d2d7] bg-white py-3 text-sm font-medium text-[#1d1d1f] hover:border-[#aeaeb2] hover:bg-[#f5f5f7] transition-all"
+                >
+                  <svg className="size-4" viewBox="0 0 24 24">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                  </svg>
+                  Continue with Google
+                </button>
+
+                {/* Divider */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-[#e8e8ed]" />
+                  <span className="text-xs text-[#aeaeb2]">or</span>
+                  <div className="flex-1 h-px bg-[#e8e8ed]" />
+                </div>
+
+                {/* Email OTP */}
                 <div>
-                  <label className="text-sm font-medium text-[#1d1d1f] mb-2 block">Your email address</label>
                   <input
                     type="email"
                     value={email}
@@ -171,16 +347,15 @@ function ParticipantContent({ id }: { id: string }) {
                     onKeyDown={(e) => e.key === "Enter" && handleSendOtp()}
                     placeholder="you@example.com"
                     className="w-full rounded-xl border border-[#d2d2d7] bg-white px-4 py-2.5 text-sm text-[#1d1d1f] placeholder:text-[#aeaeb2] focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
-                    disabled={authLoading}
                   />
                 </div>
                 {authError && <p className="text-sm text-red-500">{authError}</p>}
                 <button
                   onClick={handleSendOtp}
-                  disabled={!email.trim() || authLoading}
-                  className="w-full flex items-center justify-center gap-2 rounded-full bg-primary py-3 text-sm font-medium text-white hover:bg-[#5a2fd4] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  disabled={!email.trim()}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-[#d2d2d7] bg-white py-3 text-sm font-medium text-[#1d1d1f] hover:border-[#aeaeb2] hover:bg-[#f5f5f7] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                 >
-                  {authLoading ? <CircleNotch className="size-4 animate-spin" /> : "Send one-time code"}
+                  Send one-time code
                 </button>
                 <p className="text-xs text-[#aeaeb2] text-center">
                   We'll email you a 6-digit code. No password needed.
@@ -191,26 +366,22 @@ function ParticipantContent({ id }: { id: string }) {
                 <p className="text-sm text-[#6e6e73] text-center">
                   Code sent to <span className="font-medium text-[#1d1d1f]">{email}</span>
                 </p>
-                <div>
-                  <label className="text-sm font-medium text-[#1d1d1f] mb-2 block">Enter 6-digit code</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    onKeyDown={(e) => e.key === "Enter" && handleVerifyOtp()}
-                    placeholder="123456"
-                    className="w-full rounded-xl border border-[#d2d2d7] bg-white px-4 py-2.5 text-sm font-mono text-center tracking-widest text-[#1d1d1f] placeholder:text-[#aeaeb2] focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
-                    disabled={authLoading}
-                  />
-                </div>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onKeyDown={(e) => e.key === "Enter" && handleVerifyOtp()}
+                  placeholder="123456"
+                  className="w-full rounded-xl border border-[#d2d2d7] bg-white px-4 py-2.5 text-sm font-mono text-center tracking-widest text-[#1d1d1f] placeholder:text-[#aeaeb2] focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                />
                 {authError && <p className="text-sm text-red-500">{authError}</p>}
                 <button
                   onClick={handleVerifyOtp}
-                  disabled={otpCode.length !== 6 || authLoading}
+                  disabled={otpCode.length !== 6}
                   className="w-full flex items-center justify-center gap-2 rounded-full bg-primary py-3 text-sm font-medium text-white hover:bg-[#5a2fd4] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                 >
-                  {authLoading ? <CircleNotch className="size-4 animate-spin" /> : "Verify & continue"}
+                  Verify & continue
                 </button>
                 <button
                   onClick={() => { setOtpSent(false); setOtpCode(""); setAuthError("") }}

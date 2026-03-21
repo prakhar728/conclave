@@ -49,8 +49,15 @@ def _get_public_key(kid: str) -> object:
 
 
 def send_otp(email: str) -> None:
-    """Send a one-time password email via Supabase. Raises on failure."""
-    _client().auth.sign_in_with_otp({"email": email})
+    """
+    Send a 6-digit OTP email via Supabase.
+    Omitting email_redirect_to signals OTP mode (not magic link).
+    Also requires Email OTP to be enabled in the Supabase Auth dashboard.
+    """
+    _client().auth.sign_in_with_otp({
+        "email": email,
+        "options": {"should_create_user": True},
+    })
 
 
 def verify_otp(email: str, token: str) -> str:

@@ -45,6 +45,12 @@ function Nav() {
             Verify Enclave
           </a>
           <Link
+            href="/access"
+            className="hidden sm:inline-flex rounded-full border border-[#d2d2d7] px-4 py-1.5 text-sm font-medium text-[#1d1d1f] hover:border-[#aeaeb2] transition-colors"
+          >
+            Access Dashboard
+          </Link>
+          <Link
             href="/setup"
             className="rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-white hover:bg-[#5a2fd4] transition-colors"
           >

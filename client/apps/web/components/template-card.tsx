@@ -5,6 +5,7 @@ export type TemplateStatus = "live" | "coming_soon"
 
 export interface Template {
   name: string
+  skill_name: string
   icon: string
   status: TemplateStatus
   goesIn: string[]
@@ -15,6 +16,7 @@ export interface Template {
 export const TEMPLATE_CATALOG: Template[] = [
   {
     name: "Hackathon Judge",
+    skill_name: "hackathon_novelty",
     icon: "⚡",
     status: "live",
     goesIn: ["Idea text", "Pitch deck (PDF)", "GitHub repo"],
@@ -23,6 +25,7 @@ export const TEMPLATE_CATALOG: Template[] = [
   },
   {
     name: "Investor Memo Scorer",
+    skill_name: "investor_memo",
     icon: "📊",
     status: "coming_soon",
     goesIn: ["Investment memo", "Market thesis"],
@@ -31,6 +34,7 @@ export const TEMPLATE_CATALOG: Template[] = [
   },
   {
     name: "Team Fit Analyzer",
+    skill_name: "team_fit",
     icon: "🤝",
     status: "coming_soon",
     goesIn: ["Role description", "Candidate profiles"],

@@ -202,8 +202,8 @@ function SetupContent() {
                 key={t.name}
                 template={t}
                 selectable
-                selected={selectedSkill === t.name}
-                onSelect={() => setSelectedSkill(t.name)}
+                selected={selectedSkill === t.skill_name}
+                onSelect={() => setSelectedSkill(t.skill_name)}
               />
             ))}
           </div>

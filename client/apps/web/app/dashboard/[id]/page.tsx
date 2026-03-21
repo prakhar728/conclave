@@ -20,13 +20,13 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
   const [adminToken, setAdminToken] = React.useState<string | null>(null)
   const [tokenInput, setTokenInput] = React.useState("")
   const [results, setResults] = React.useState<NoveltyResult[]>([])
-  const [subCount, setSubCount] = React.useState(3)
+  const [subCount, setSubCount] = React.useState(0)
+  const [threshold, setThreshold] = React.useState(5)
   const [triggering, setTriggering] = React.useState(false)
   const [triggered, setTriggered] = React.useState(false)
   const [copied, setCopied] = React.useState(false)
 
-  const threshold = 5
-
+  // Load admin token from localStorage
   React.useEffect(() => {
     const raw = localStorage.getItem(`ndai_instance_${id}`)
     if (raw) {
@@ -35,11 +35,33 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
     }
   }, [id])
 
+  // Poll instance status (public endpoint — no auth needed)
   React.useEffect(() => {
-    if (adminToken && triggered) {
-      api.getAllResults(adminToken).then((r) => setResults(r.results))
+    async function fetchStatus() {
+      try {
+        const inst = await api.checkInstance(id)
+        setSubCount(inst.submissions)
+        setThreshold(inst.threshold)
+        if (inst.triggered) setTriggered(true)
+      } catch {
+        // instance missing or server down — ignore
+      }
     }
-  }, [adminToken, triggered])
+    fetchStatus()
+    const interval = setInterval(fetchStatus, 10000)
+    return () => clearInterval(interval)
+  }, [id])
+
+  // Once we have the admin token, fetch results if analysis already ran
+  React.useEffect(() => {
+    if (!adminToken) return
+    api.getAllResults(adminToken).then((r) => {
+      if (r.results.length > 0) {
+        setResults(r.results)
+        setTriggered(true)
+      }
+    }).catch(() => {})
+  }, [adminToken])
 
   async function runAnalysis() {
     if (!adminToken) return

@@ -120,13 +120,19 @@ function authHeaders(token: string): Record<string, string> {
   }
 }
 
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message)
+  }
+}
+
 async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
   const res = await fetch(`${TEE_URL}${path}`, {
     method: "POST",
     headers: token ? authHeaders(token) : { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(`${path} failed: ${res.status}`)
+  if (!res.ok) throw new ApiError(res.status, `${path} failed: ${res.status}`)
   return res.json()
 }
 
@@ -134,12 +140,16 @@ async function get<T>(path: string, token?: string): Promise<T> {
   const res = await fetch(`${TEE_URL}${path}`, {
     headers: token ? authHeaders(token) : {},
   })
-  if (!res.ok) throw new Error(`${path} failed: ${res.status}`)
+  if (!res.ok) throw new ApiError(res.status, `${path} failed: ${res.status}`)
   return res.json()
 }
 
 export const api = {
   // --- Public ---
+  checkInstance: async (instance_id: string): Promise<{ skill_name: string; triggered: boolean; submissions: number; threshold: number }> => {
+    return get(`/instances/${instance_id}`)
+  },
+
   health: async (): Promise<HealthResponse> => {
     if (MOCK)
       return { status: "ok", instances: 3, submissions: 12, skills: ["hackathon_novelty"] }
@@ -225,12 +235,20 @@ export const api = {
     return post("/auth/verify-otp", { email, token, instance_id })
   },
 
+  verifyToken: async (access_token: string, instance_id: string): Promise<{ user_token: string }> => {
+    return post("/auth/verify-token", { access_token, instance_id })
+  },
+
   // --- Participant ---
+  getMySubmissions: async (token: string): Promise<{ submission_ids: string[] }> => {
+    return get("/my-submissions", token)
+  },
+
   submit: async (token: string, submission: Record<string, unknown>): Promise<SubmitResponse> => {
     if (MOCK) {
       await delay(600)
       return {
-        submission_id: submission.submission_id as string,
+        submission_id: `mock-${Math.random().toString(36).slice(2, 9)}`,
         status: "received_pending",
         submissions_count: 3,
         threshold: 5,
@@ -247,6 +265,11 @@ export const api = {
       return r
     }
     return get(`/results/${submission_id}`, token)
+  },
+
+  // --- Token resolution ---
+  resolveToken: async (token: string): Promise<{ instance_id: string; role: string }> => {
+    return get("/me", token)
   },
 
   // --- Operator ---
