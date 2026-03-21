@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import { use } from "react"
-import { useSearchParams } from "next/navigation"
 import {
   Lock,
   Check,
@@ -18,13 +17,46 @@ import type { NoveltyResult, SubmitResponse } from "@/lib/types"
 import { cn } from "@workspace/ui/lib/utils"
 import { Suspense } from "react"
 
-type PageState = "attest" | "form" | "pending" | "results"
+
+type PageState = "login" | "attest" | "form" | "pending" | "results"
 
 function ParticipantContent({ id }: { id: string }) {
-  const searchParams = useSearchParams()
-  const userToken = searchParams.get("token") ?? ""
+  const [pageState, setPageState] = React.useState<PageState>("login")
+  const [userToken, setUserToken] = React.useState("")
 
-  const [pageState, setPageState] = React.useState<PageState>("attest")
+  // --- OTP auth state ---
+  const [email, setEmail] = React.useState("")
+  const [otpCode, setOtpCode] = React.useState("")
+  const [otpSent, setOtpSent] = React.useState(false)
+  const [authLoading, setAuthLoading] = React.useState(false)
+  const [authError, setAuthError] = React.useState("")
+
+  async function handleSendOtp() {
+    if (!email.trim()) return
+    setAuthLoading(true)
+    setAuthError("")
+    try {
+      await api.sendOtp(email.trim(), id)
+      setOtpSent(true)
+    } catch {
+      setAuthError("Failed to send OTP. Check the email and try again.")
+    }
+    setAuthLoading(false)
+  }
+
+  async function handleVerifyOtp() {
+    if (!otpCode.trim()) return
+    setAuthLoading(true)
+    setAuthError("")
+    try {
+      const { user_token } = await api.verifyOtp(email.trim(), otpCode.trim(), id)
+      setUserToken(user_token)
+      setPageState("attest")
+    } catch {
+      setAuthError("Invalid or expired OTP. Try again.")
+    }
+    setAuthLoading(false)
+  }
   const [ideaText, setIdeaText] = React.useState("")
   const [repoUrl, setRepoUrl] = React.useState("")
   const [repoSummary, setRepoSummary] = React.useState<string | null>(null)
@@ -97,8 +129,8 @@ function ParticipantContent({ id }: { id: string }) {
 
         {/* Progress steps */}
         <div className="flex items-center gap-2 mb-12 justify-center">
-          {(["Verify", "Submit", "Wait", "Results"] as const).map((label, i) => {
-            const stateOrder: PageState[] = ["attest", "form", "pending", "results"]
+          {(["Login", "Verify", "Submit", "Wait", "Results"] as const).map((label, i) => {
+            const stateOrder: PageState[] = ["login", "attest", "form", "pending", "results"]
             const done = stateOrder.indexOf(pageState) > i
             const active = stateOrder.indexOf(pageState) === i
             return (
@@ -119,11 +151,77 @@ function ParticipantContent({ id }: { id: string }) {
                   </span>
                   {label}
                 </div>
-                {i < 3 && <ArrowRight className="size-3 text-[#d2d2d7] shrink-0" />}
+                {i < 4 && <ArrowRight className="size-3 text-[#d2d2d7] shrink-0" />}
               </React.Fragment>
             )
           })}
         </div>
+
+        {/* Step 0: Login (Supabase OTP) */}
+        {pageState === "login" && (
+          <div className="space-y-5 max-w-sm mx-auto">
+            {!otpSent ? (
+              <>
+                <div>
+                  <label className="text-sm font-medium text-[#1d1d1f] mb-2 block">Your email address</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSendOtp()}
+                    placeholder="you@example.com"
+                    className="w-full rounded-xl border border-[#d2d2d7] bg-white px-4 py-2.5 text-sm text-[#1d1d1f] placeholder:text-[#aeaeb2] focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                    disabled={authLoading}
+                  />
+                </div>
+                {authError && <p className="text-sm text-red-500">{authError}</p>}
+                <button
+                  onClick={handleSendOtp}
+                  disabled={!email.trim() || authLoading}
+                  className="w-full flex items-center justify-center gap-2 rounded-full bg-primary py-3 text-sm font-medium text-white hover:bg-[#5a2fd4] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  {authLoading ? <CircleNotch className="size-4 animate-spin" /> : "Send one-time code"}
+                </button>
+                <p className="text-xs text-[#aeaeb2] text-center">
+                  We'll email you a 6-digit code. No password needed.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-[#6e6e73] text-center">
+                  Code sent to <span className="font-medium text-[#1d1d1f]">{email}</span>
+                </p>
+                <div>
+                  <label className="text-sm font-medium text-[#1d1d1f] mb-2 block">Enter 6-digit code</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    onKeyDown={(e) => e.key === "Enter" && handleVerifyOtp()}
+                    placeholder="123456"
+                    className="w-full rounded-xl border border-[#d2d2d7] bg-white px-4 py-2.5 text-sm font-mono text-center tracking-widest text-[#1d1d1f] placeholder:text-[#aeaeb2] focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                    disabled={authLoading}
+                  />
+                </div>
+                {authError && <p className="text-sm text-red-500">{authError}</p>}
+                <button
+                  onClick={handleVerifyOtp}
+                  disabled={otpCode.length !== 6 || authLoading}
+                  className="w-full flex items-center justify-center gap-2 rounded-full bg-primary py-3 text-sm font-medium text-white hover:bg-[#5a2fd4] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  {authLoading ? <CircleNotch className="size-4 animate-spin" /> : "Verify & continue"}
+                </button>
+                <button
+                  onClick={() => { setOtpSent(false); setOtpCode(""); setAuthError("") }}
+                  className="w-full text-sm text-[#6e6e73] hover:text-[#1d1d1f] transition-colors"
+                >
+                  Use a different email
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Step 1: Attestation */}
         {pageState === "attest" && (

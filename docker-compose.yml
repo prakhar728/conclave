@@ -1,11 +1,8 @@
 services:
   conclave:
-    image: ghcr.io/${GITHUB_REPO}/conclave-skills:${IMAGE_TAG:-latest}
+    build: .
     ports:
       - "8000:8000"
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
-      - GITHUB_APP_ID=${GITHUB_APP_ID}
-      - GITHUB_APP_INSTALLATION_ID=${GITHUB_APP_INSTALLATION_ID}
+    env_file:
+      - .env
     restart: always
