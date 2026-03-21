@@ -92,7 +92,6 @@ function SetupContent() {
           instance_id: res.instance_id,
           skill_name: selectedSkill,
           admin_token: res.admin_token,
-          user_token: res.user_token,
           created_at: new Date().toISOString(),
         }),
       )
@@ -139,7 +138,7 @@ function SetupContent() {
   }
 
   const participantUrl = result
-    ? `${typeof window !== "undefined" ? window.location.origin : ""}/i/${result.instance_id}?token=${result.user_token}`
+    ? `${typeof window !== "undefined" ? window.location.origin : ""}/i/${result.instance_id}`
     : ""
 
   return (

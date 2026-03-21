@@ -8,8 +8,7 @@ import type {
   SubmitResponse,
 } from "./types"
 
-// Flip to false when TEE is deployed
-const MOCK = true
+const MOCK = false
 const TEE_URL = process.env.NEXT_PUBLIC_TEE_URL ?? "http://localhost:8000"
 
 // ---------------------------------------------------------------------------
@@ -215,6 +214,15 @@ export const api = {
       }
     }
     return post("/fetch-repo", { repo_url }, token)
+  },
+
+  // --- Auth ---
+  sendOtp: async (email: string, instance_id: string): Promise<void> => {
+    await post("/auth/send-otp", { email, instance_id })
+  },
+
+  verifyOtp: async (email: string, token: string, instance_id: string): Promise<{ user_token: string }> => {
+    return post("/auth/verify-otp", { email, token, instance_id })
   },
 
   // --- Participant ---

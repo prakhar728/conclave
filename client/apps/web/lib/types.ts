@@ -37,7 +37,6 @@ export interface InitResponse {
   status: "configuring" | "ready"
   message: string
   admin_token?: string
-  user_token?: string
 }
 
 // /submit
@@ -81,7 +80,5 @@ export interface StoredInstance {
   instance_id: string
   skill_name: string
   admin_token: string
-  user_token: string
-  participant_url: string
   created_at: string
 }
