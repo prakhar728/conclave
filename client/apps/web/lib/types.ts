@@ -2,6 +2,17 @@
 
 export type SkillStatus = "live" | "coming_soon"
 
+export type DisplayHintType = "gauge" | "percentile" | "badge" | "score_table" | "text"
+
+export interface DisplayHint {
+  type: DisplayHintType
+  label: string
+  min?: number
+  max?: number
+}
+
+export type DisplayMap = Record<string, DisplayHint>
+
 export interface SkillCard {
   name: string
   description: string
@@ -12,6 +23,7 @@ export interface SkillCard {
   trigger_modes: TriggerMode[]
   roles: { operator: RoleConfig; participant: RoleConfig }
   setup_prompt: string
+  user_display: DisplayMap
 }
 
 export interface TriggerMode {

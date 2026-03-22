@@ -34,6 +34,7 @@ class SkillCard:
     roles: dict = field(default_factory=dict)           # admin + user role declarations
     setup_prompt: str = ""                              # LLM onboarding text for admins (metadata/docs)
     init_handler: Optional[Callable] = None             # skill-owned onboarding conversation handler
+    user_display: dict = field(default_factory=dict)    # display hints per output key for the frontend renderer
     version: str = "0.1.0"
 
     def metadata(self) -> dict:
@@ -48,4 +49,5 @@ class SkillCard:
             "trigger_modes": self.trigger_modes,
             "roles": self.roles,
             "setup_prompt": self.setup_prompt,
+            "user_display": self.user_display,
         }

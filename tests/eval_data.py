@@ -30,7 +30,6 @@ EVAL_SUBMISSIONS = [
             "and misses 40% of security issues. Solution: Reduce review time by 60% with AI assistance. "
             "Revenue model: SaaS per-seat pricing, $15/user/month. Year 1 target: 500 enterprise teams."
         ),
-        # "score": 37, # Placeholder score for testing triage logic; not based on actual evaluation criteria
     },
     {
         "submission_id": "eval_002",
@@ -49,8 +48,6 @@ EVAL_SUBMISSIONS = [
             "Our tool shifts security left, catching issues before they reach production. "
             "B2B SaaS, $20/developer/month. Integration with Jira and Slack for triage workflows."
         ),
-        # "score": 37, # Placeholder score for testing triage logic; not based on actual evaluation criteria
-
     },
     {
         "submission_id": "eval_003",
@@ -71,16 +68,12 @@ EVAL_SUBMISSIONS = [
             "Our TEE approach provides cryptographic privacy guarantees. Pilot in progress with 3 "
             "regional hospital networks. Regulatory pre-approval pathway under FDA Digital Health framework."
         ),
-        # "score": 37, # Placeholder score for testing triage logic; not based on actual evaluation criteria
-
     },
     {
         "submission_id": "eval_004",
         "idea_text": "An app that uses AI to help people.",
         "repo_summary": None,
         "deck_text": None,
-        # "score": 37, # Placeholder score for testing triage logic; not based on actual evaluation criteria
-
     },
     {
         "submission_id": "eval_005",
@@ -102,8 +95,6 @@ EVAL_SUBMISSIONS = [
             "royalties via on-chain licensing. $50M addressable market in year 1 from enterprise "
             "AI teams that need domain-specific models. DAO governance for marketplace policies."
         ),
-        # "score": 37, # Placeholder score for testing triage logic; not based on actual evaluation criteria
-
     },
     {
         "submission_id": "eval_006",
@@ -121,8 +112,6 @@ EVAL_SUBMISSIONS = [
             "RLHF correction pipeline triggered automatically when rolling bias score exceeds threshold."
         ),
         "deck_text": None,
-        # "score": 37, # Placeholder score for testing triage logic; not based on actual evaluation criteria
-
     },
 ]
 

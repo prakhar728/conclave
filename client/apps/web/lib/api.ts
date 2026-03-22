@@ -1,5 +1,6 @@
 import type {
   AttestationResponse,
+  DisplayMap,
   HealthResponse,
   InitRequest,
   InitResponse,
@@ -14,6 +15,16 @@ const TEE_URL = process.env.NEXT_PUBLIC_TEE_URL ?? "http://localhost:8000"
 // ---------------------------------------------------------------------------
 // Mock data
 // ---------------------------------------------------------------------------
+
+const HACKATHON_NOVELTY_DISPLAY: DisplayMap = {
+  novelty_score:   { type: "gauge",       label: "Novelty",            min: 0, max: 1 },
+  percentile:      { type: "percentile",  label: "Percentile" },
+  cluster:         { type: "badge",       label: "Cluster" },
+  status:          { type: "badge",       label: "Status" },
+  analysis_depth:  { type: "badge",       label: "Depth" },
+  duplicate_of:    { type: "text",        label: "Duplicate Of" },
+  criteria_scores: { type: "score_table", label: "Criteria Breakdown" },
+}
 
 const MOCK_SKILLS: SkillCard[] = [
   {
@@ -50,6 +61,7 @@ const MOCK_SKILLS: SkillCard[] = [
     },
     setup_prompt:
       "Configure your hackathon evaluation criteria, scoring weights, and judging guidelines.",
+    user_display: HACKATHON_NOVELTY_DISPLAY,
   },
   {
     name: "dataset_audit",
@@ -65,6 +77,11 @@ const MOCK_SKILLS: SkillCard[] = [
       participant: { can_view_own: true },
     },
     setup_prompt: "Upload your dataset schema and define the quality thresholds.",
+    user_display: {
+      quality_score:  { type: "gauge",  label: "Quality Score", min: 0, max: 1 },
+      null_rate:      { type: "gauge",  label: "Null Rate",     min: 0, max: 1 },
+      anomaly_count:  { type: "text",   label: "Anomalies" },
+    },
   },
 ]
 

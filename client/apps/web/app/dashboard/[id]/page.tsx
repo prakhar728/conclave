@@ -3,11 +3,11 @@
 import * as React from "react"
 import { use } from "react"
 import { Copy, Check, Lightning, ArrowCounterClockwise, Export, ShieldCheck } from "@phosphor-icons/react"
-import { AttestationWidget } from "@/components/attestation-widget"
 import { EnclaveSigBadge } from "@/components/enclave-sig-badge"
 import { StatusPill } from "@/components/status-pill"
+import { FieldCell, ResultExpandedRow } from "@/components/result-renderer"
 import { api } from "@/lib/api"
-import type { NoveltyResult } from "@/lib/types"
+import type { DisplayMap, NoveltyResult } from "@/lib/types"
 import { cn } from "@workspace/ui/lib/utils"
 import Link from "next/link"
 import { ArrowLeft } from "@phosphor-icons/react"
@@ -20,6 +20,7 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
   const [adminToken, setAdminToken] = React.useState<string | null>(null)
   const [tokenInput, setTokenInput] = React.useState("")
   const [results, setResults] = React.useState<NoveltyResult[]>([])
+  const [display, setDisplay] = React.useState<DisplayMap>({})
   const [subCount, setSubCount] = React.useState(0)
   const [threshold, setThreshold] = React.useState(5)
   const [triggering, setTriggering] = React.useState(false)
@@ -35,7 +36,7 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
     }
   }, [id])
 
-  // Poll instance status (public endpoint — no auth needed)
+  // Poll instance status + fetch skill display hints (public endpoints — no auth needed)
   React.useEffect(() => {
     async function fetchStatus() {
       try {
@@ -43,6 +44,12 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
         setSubCount(inst.submissions)
         setThreshold(inst.threshold)
         if (inst.triggered) setTriggered(true)
+        // Fetch skill display hints once on first successful status call
+        if (inst.skill_name) {
+          api.getSkill(inst.skill_name).then((card) => {
+            if (card.user_display) setDisplay(card.user_display)
+          }).catch(() => {})
+        }
       } catch {
         // instance missing or server down — ignore
       }
@@ -294,24 +301,7 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
                   <ShieldCheck weight="fill" className="size-5 text-success" />
                   <span className="text-sm text-success font-medium">Results signed by enclave</span>
                 </div>
-                <div className="rounded-2xl border border-[#d2d2d7] bg-white overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-[#e8e8ed] bg-[#f5f5f7]">
-                        {["Submission ID", "Novelty", "Percentile", "Cluster", "Depth", "Status"].map((h) => (
-                          <th key={h} className="text-left text-xs font-semibold text-[#6e6e73] uppercase tracking-wider px-5 py-3">
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {results.map((r) => (
-                        <ResultRow key={r.submission_id} result={r} />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <ResultsTable results={results} display={display} />
               </div>
             )}
           </div>
@@ -332,8 +322,55 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
   )
 }
 
-function ResultRow({ result }: { result: NoveltyResult }) {
+function ResultsTable({
+  results,
+  display,
+}: {
+  results: NoveltyResult[]
+  display: DisplayMap
+}) {
+  // Table columns: all display hints except score_table (shown in expanded row)
+  const colFields = Object.entries(display).filter(([, h]) => h.type !== "score_table")
+  const colCount = 1 + colFields.length // +1 for submission_id
+
+  return (
+    <div className="rounded-2xl border border-[#d2d2d7] bg-white overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-[#e8e8ed] bg-[#f5f5f7]">
+            <th className="text-left text-xs font-semibold text-[#6e6e73] uppercase tracking-wider px-5 py-3">
+              Submission ID
+            </th>
+            {colFields.map(([key, hint]) => (
+              <th key={key} className="text-left text-xs font-semibold text-[#6e6e73] uppercase tracking-wider px-5 py-3">
+                {hint.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {results.map((r) => (
+            <ResultRow key={r.submission_id} result={r} colFields={colFields} colCount={colCount} display={display} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function ResultRow({
+  result,
+  colFields,
+  colCount,
+  display,
+}: {
+  result: NoveltyResult
+  colFields: [string, import("@/lib/types").DisplayHint][]
+  colCount: number
+  display: DisplayMap
+}) {
   const [expanded, setExpanded] = React.useState(false)
+  const row = result as unknown as Record<string, unknown>
 
   return (
     <>
@@ -342,35 +379,16 @@ function ResultRow({ result }: { result: NoveltyResult }) {
         onClick={() => setExpanded((v) => !v)}
       >
         <td className="px-5 py-3.5 font-mono text-sm text-[#6e6e73]">{result.submission_id}</td>
-        <td className="px-5 py-3.5">
-          <span className="font-semibold text-[#1d1d1f] text-base">{(result.novelty_score * 100).toFixed(0)}</span>
-          <span className="text-xs text-[#aeaeb2]">%</span>
-        </td>
-        <td className="px-5 py-3.5 text-sm text-[#1d1d1f]">{result.percentile}th</td>
-        <td className="px-5 py-3.5">
-          <span className="text-xs bg-primary/10 text-primary font-medium rounded-full px-2.5 py-1">
-            {result.cluster}
-          </span>
-        </td>
-        <td className="px-5 py-3.5 text-sm text-[#6e6e73]">{result.analysis_depth}</td>
-        <td className="px-5 py-3.5 text-sm text-[#6e6e73]">{result.status}</td>
+        {colFields.map(([key, hint]) => (
+          <td key={key} className="px-5 py-3.5">
+            <FieldCell hint={hint} value={row[key]} />
+          </td>
+        ))}
       </tr>
       {expanded && (
         <tr className="border-b border-[#e8e8ed] bg-[#f5f5f7]/50">
-          <td colSpan={6} className="px-6 py-5">
-            <div className="flex flex-wrap gap-6">
-              {Object.entries(result.criteria_scores).map(([k, v]) => (
-                <div key={k} className="min-w-[140px]">
-                  <div className="flex justify-between text-sm mb-1.5">
-                    <span className="text-[#6e6e73] capitalize">{k}</span>
-                    <span className="text-[#1d1d1f] font-medium">{v}/10</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-white overflow-hidden">
-                    <div className="h-full rounded-full bg-primary" style={{ width: `${(v / 10) * 100}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
+          <td colSpan={colCount} className="px-6 py-5">
+            <ResultExpandedRow result={row} display={display} />
             {result.enclave_signature && (
               <div className="mt-4">
                 <EnclaveSigBadge

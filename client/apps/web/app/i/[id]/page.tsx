@@ -12,8 +12,9 @@ import {
 } from "@phosphor-icons/react"
 import { AttestationWidget } from "@/components/attestation-widget"
 import { EnclaveSigBadge } from "@/components/enclave-sig-badge"
+import { ResultDetail } from "@/components/result-renderer"
 import { api, ApiError } from "@/lib/api"
-import type { NoveltyResult, SubmitResponse } from "@/lib/types"
+import type { DisplayMap, NoveltyResult, SubmitResponse } from "@/lib/types"
 import { cn } from "@workspace/ui/lib/utils"
 import { Suspense } from "react"
 
@@ -82,9 +83,15 @@ function ParticipantContent({ id }: { id: string }) {
     }
   }
 
-  // On mount: verify the instance exists first, then restore session if cached.
+  // On mount: verify the instance exists first, fetch skill display hints, then restore session.
   React.useEffect(() => {
-    api.checkInstance(id).catch(() => setInstanceMissing(true))
+    api.checkInstance(id).then((inst) => {
+      if (inst.skill_name) {
+        api.getSkill(inst.skill_name).then((card) => {
+          if (card.user_display) setSkillDisplay(card.user_display)
+        }).catch(() => {})
+      }
+    }).catch(() => setInstanceMissing(true))
 
     const cached = localStorage.getItem(TOKEN_CACHE_KEY(id))
     if (cached) {
@@ -141,6 +148,8 @@ function ParticipantContent({ id }: { id: string }) {
     }
     setAuthLoading(false)
   }
+  const [skillDisplay, setSkillDisplay] = React.useState<DisplayMap>({})
+
   const [ideaText, setIdeaText] = React.useState("")
   const [repoUrl, setRepoUrl] = React.useState("")
   const [repoSummary, setRepoSummary] = React.useState<string | null>(null)
@@ -539,69 +548,16 @@ function ParticipantContent({ id }: { id: string }) {
 
         {/* Step 4: Results */}
         {pageState === "results" && result && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             <div className="flex items-center gap-2 text-sm text-success font-medium mb-3">
               <Check weight="bold" className="size-4" /> Analysis complete
             </div>
 
-            {/* Novelty score */}
-            <div className="rounded-2xl border border-[#d2d2d7] bg-white p-10 text-center">
-              <p className="text-sm text-[#6e6e73] mb-4">Novelty Score</p>
-              <div className="relative inline-flex items-center justify-center mb-4">
-                <svg className="size-32 -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="42" fill="none" stroke="#f5f5f7" strokeWidth="6" />
-                  <circle
-                    cx="50" cy="50" r="42" fill="none"
-                    stroke="#6e3ff3" strokeWidth="6"
-                    strokeDasharray={`${result.novelty_score * 264} 264`}
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <span className="absolute text-4xl font-bold text-[#1d1d1f] tracking-apple-tight">
-                  {(result.novelty_score * 100).toFixed(0)}
-                </span>
-              </div>
-              <p className="text-base text-[#6e6e73]">
-                Top {100 - result.percentile}% of submissions
-              </p>
-            </div>
+            <ResultDetail
+              result={result as unknown as Record<string, unknown>}
+              display={skillDisplay}
+            />
 
-            {/* Percentile + cluster */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-2xl border border-[#d2d2d7] bg-white p-5 text-center">
-                <p className="text-xs text-[#6e6e73] mb-1.5">Percentile</p>
-                <p className="text-3xl font-bold text-[#1d1d1f] tracking-apple">{result.percentile}<span className="text-sm text-[#aeaeb2]">th</span></p>
-              </div>
-              <div className="rounded-2xl border border-[#d2d2d7] bg-white p-5 text-center">
-                <p className="text-xs text-[#6e6e73] mb-1.5">Cluster</p>
-                <span className="inline-block mt-1.5 text-sm bg-primary/10 text-primary font-medium rounded-full px-3 py-1">
-                  {result.cluster}
-                </span>
-              </div>
-            </div>
-
-            {/* Criteria breakdown */}
-            <div className="rounded-2xl border border-[#d2d2d7] bg-white p-6">
-              <p className="text-sm font-semibold text-[#1d1d1f] tracking-apple mb-5">Criteria breakdown</p>
-              <div className="space-y-4">
-                {Object.entries(result.criteria_scores).map(([k, v]) => (
-                  <div key={k}>
-                    <div className="flex justify-between text-sm mb-1.5">
-                      <span className="text-[#1d1d1f] capitalize">{k}</span>
-                      <span className="text-[#6e6e73] font-mono">{v}/10</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-[#f5f5f7] overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-primary transition-all"
-                        style={{ width: `${(v / 10) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Signature */}
             {result.enclave_signature && (
               <div>
                 <p className="text-xs text-[#6e6e73] mb-2.5">Enclave signature</p>
