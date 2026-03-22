@@ -13,6 +13,7 @@ langgraph
 python-dotenv
 pytest
 httpx
+python-multipart
 PyJWT>=2.8.0
 supabase>=2.0.0
 cryptography>=42.0.0

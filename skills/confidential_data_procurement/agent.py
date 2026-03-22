@@ -1,31 +1,30 @@
 """
 Single evaluate_node agent for confidential_data_procurement.
 
-The agent gets one LLM call (with tool loop) to:
-  1. Read the dataset schema and column stats via tools
-  2. Match the buyer's required columns to actual columns (semantic/fuzzy)
-  3. Verify the seller's claims against observed statistics
-  4. Write a bounded explanation for both parties
-  5. Output schema_score and claim_veracity_score to replace deterministic placeholders
+Graph: StateGraph with single evaluate_node → END.
+Provides LangSmith trace visibility with proper node names, tool calls, and timing.
 
 The dataset never leaves the TEE — the LLM sees only aggregate statistics
 returned by the tools. validate_tool_output() in tools.py blocks raw row dumps.
 
-Graph: single evaluate_node (no routing needed — one supplier, one dataset per run).
+Graph:
+    evaluate_node (LLM + tools) → END
 """
 from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Annotated, TypedDict
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
+from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
 from config import get_llm
 from skills.confidential_data_procurement.config import EVALUATE_MODEL
 from skills.confidential_data_procurement.models import BuyerPolicy, DatasetMetrics
-from skills.confidential_data_procurement.tools import EVALUATE_TOOLS
+from skills.confidential_data_procurement.tools import EVALUATE_TOOLS, set_context
 
 
 EVALUATE_PROMPT_VERSION = "v1"
@@ -82,24 +81,34 @@ After calling the tools you need, output ONLY this JSON (no markdown fences, no 
 """
 
 
-def run_agent(
-    dataset_id: str,
-    policy: BuyerPolicy,
-    metrics: DatasetMetrics,
-    component_scores: dict[str, float],
-) -> dict[str, Any]:
-    """
-    Run the evaluate node for one dataset.
+class EvaluateState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
+    dataset_id: str
+    policy: Any       # BuyerPolicy — held in-memory, not serialized
+    metrics: Any      # DatasetMetrics — held in-memory, not serialized
+    eval_result: dict
 
-    Returns a dict with:
-      schema_score, claim_veracity_score, schema_matching, claim_verification, explanation
-    Falls back to safe defaults if the LLM output cannot be parsed.
-    """
+
+# --- Node ---
+
+def evaluate_node(state: EvaluateState) -> dict:
+    """LLM node: schema matching + claim verification + explanation with tool loop."""
     from skills.confidential_data_procurement.ingest import get_dataset
+
+    dataset_id = state["dataset_id"]
+    policy: BuyerPolicy = state["policy"]
+    metrics: DatasetMetrics = state["metrics"]
 
     dataset = get_dataset(dataset_id)
     column_definitions = dataset.get("column_definitions") or {}
     seller_claims = dataset.get("seller_claims") or {}
+
+    # Bind tools to the active dataset
+    set_context(dataset_id, {
+        "required_columns": policy.required_columns or [],
+        "column_definitions": column_definitions,
+        "seller_claims": seller_claims,
+    })
 
     required_str = ", ".join(policy.required_columns) if policy.required_columns else "(none)"
     definitions_str = (
@@ -117,7 +126,6 @@ def run_agent(
         seller_claims=claims_str,
     )
 
-    # Build deterministic context note for the LLM
     det_note = (
         f"Deterministic metrics already computed:\n"
         f"  rows={metrics.row_count}, "
@@ -157,9 +165,54 @@ def run_agent(
             "claim_veracity_score, schema_matching, claim_verification, and explanation."
         )))
         response = llm.invoke(messages)
+        messages.append(response)
         raw = response.content if isinstance(response.content, str) else ""
 
-    return _parse_agent_output(raw, policy, seller_claims)
+    parsed = _parse_agent_output(raw, policy, seller_claims)
+    return {"messages": messages, "eval_result": parsed}
+
+
+# --- Graph builder ---
+
+def _build_evaluate_graph():
+    """Build and compile the single-node StateGraph for dataset evaluation."""
+    graph = StateGraph(EvaluateState)
+    graph.add_node("evaluate", evaluate_node)
+    graph.set_entry_point("evaluate")
+    graph.add_edge("evaluate", END)
+    return graph.compile()
+
+
+# --- Entry point ---
+
+def run_agent(
+    dataset_id: str,
+    policy: BuyerPolicy,
+    metrics: DatasetMetrics,
+    component_scores: dict[str, float],
+) -> dict[str, Any]:
+    """
+    Run the evaluate node for one dataset.
+
+    Returns a dict with:
+      schema_score, claim_veracity_score, schema_matching, claim_verification, explanation
+    Falls back to safe defaults if the LLM output cannot be parsed.
+    """
+    graph = _build_evaluate_graph()
+
+    initial_state: EvaluateState = {
+        "messages": [],
+        "dataset_id": dataset_id,
+        "policy": policy,
+        "metrics": metrics,
+        "eval_result": {},
+    }
+
+    final_state = graph.invoke(initial_state, config={
+        "recursion_limit": 50,
+        "metadata": {"evaluate_prompt": EVALUATE_PROMPT_VERSION},
+    })
+    return final_state["eval_result"]
 
 
 # ---------------------------------------------------------------------------
