@@ -8,7 +8,6 @@ from skills.hackathon_novelty.deterministic import (
     pairwise_similarity,
     compute_novelty_scores,
     compute_percentiles,
-    compute_relevance_scores,
     cluster_submissions,
     run_deterministic,
 )
@@ -63,17 +62,50 @@ def test_run_deterministic_end_to_end():
     assert result["percentiles"].shape[0] == len(subs)
     assert len(result["clusters"]) == len(subs)
     assert len(result["submission_ids"]) == len(subs)
-    assert "relevance_scores" in result
-    # No guidelines/criteria passed → relevance_scores is None
-    assert result["relevance_scores"] is None
+    assert "relevance_scores" not in result
 
 
-def test_run_deterministic_with_relevance():
-    subs = _make_submissions()
-    result = run_deterministic(subs, guidelines="Focus on AI/ML", criteria={"originality": 0.5, "feasibility": 0.5})
-    assert result["relevance_scores"] is not None
-    assert result["relevance_scores"].shape[0] == len(subs)
-    assert all(0.0 <= s <= 1.0 for s in result["relevance_scores"])
+# --- Ingestion tests ---
+
+from skills.hackathon_novelty.tools import get_raw_text, parse_markdown, set_context as _set_tool_context
+from skills.hackathon_novelty.ingest import _parse_ingest_output
+
+
+def test_ingest_passthrough():
+    """Short plain text should pass through get_raw_text unchanged."""
+    subs = [HackathonSubmission(submission_id="x", idea_text="A short idea about AI.")]
+    import skills.hackathon_novelty.tools as tools_mod
+    tools_mod._submissions = {s.submission_id: s for s in subs}
+    result = get_raw_text.invoke({"submission_id": "x"})
+    assert result["text"] == "A short idea about AI."
+    assert result["word_count"] == 5
+
+
+def test_ingest_markdown_strip():
+    """Markdown formatting should be stripped to plain text."""
+    subs = [HackathonSubmission(
+        submission_id="md1",
+        idea_text="# Title\n\n**Bold** and *italic* text with `code`.",
+        idea_file_type="markdown",
+    )]
+    import skills.hackathon_novelty.tools as tools_mod
+    tools_mod._submissions = {s.submission_id: s for s in subs}
+    result = parse_markdown.invoke({"submission_id": "md1"})
+    assert "#" not in result["text"]
+    assert "**" not in result["text"]
+    assert "*" not in result["text"]
+    assert "`" not in result["text"]
+    assert "Bold" in result["text"]
+    assert "italic" in result["text"]
+
+
+def test_ingest_parse_output():
+    """Parser should extract valid submission_id → text mapping."""
+    subs = [HackathonSubmission(submission_id="s1", idea_text="x")]
+    text = '{"s1": "normalized text", "s2": "unknown id"}'
+    result = _parse_ingest_output(text, subs)
+    assert result == {"s1": "normalized text"}
+    assert "s2" not in result
 
 
 # --- Agent + Guardrails tests ---
@@ -91,10 +123,11 @@ def test_run_skill_with_mocked_llm():
     )
 
     fake_agent_results = [
-        {"submission_id": s.submission_id, "criteria_scores": {"originality": 7.0, "feasibility": 6.0, "impact": 8.0}}
+        {"submission_id": s.submission_id, "criteria_scores": {"originality": 7.0, "feasibility": 6.0, "impact": 8.0}, "aligned": True}
         for s in subs
     ]
-    with patch("skills.hackathon_novelty.run_agent", return_value=fake_agent_results):
+    with patch("skills.hackathon_novelty.run_ingest", return_value={}), \
+         patch("skills.hackathon_novelty.run_agent", return_value=fake_agent_results):
         response = run_skill(subs, config)
 
     assert response.skill == "hackathon_novelty"
@@ -104,7 +137,8 @@ def test_run_skill_with_mocked_llm():
         assert 0.0 <= r["novelty_score"] <= 1.0
         assert "percentile" not in r
         assert "cluster" not in r
-        assert "relevance_score" in r
+        assert "relevance_score" not in r
+        assert "aligned" in r
         assert "criteria_scores" in r
 
 
@@ -126,16 +160,15 @@ def test_filter_strips_extra_keys():
 
 def test_filter_clamps_out_of_bounds():
     f = HackathonNoveltyFilter()
-    result = {"novelty_score": 1.5, "relevance_score": 1.5, "criteria_scores": {"originality": 15.0}}
+    result = {"novelty_score": 1.5, "criteria_scores": {"originality": 15.0}}
     clamped = f.check_bounds(result)
     assert clamped["novelty_score"] == 1.0
-    assert clamped["relevance_score"] == 1.0
     assert clamped["criteria_scores"]["originality"] == 10.0
 
 
 def test_filter_detects_leakage():
     f = HackathonNoveltyFilter()
     raw = "An AI-powered code review tool that uses LLMs to detect security vulnerabilities"
-    result = {"submission_id": "1", "novelty_score": 0.8, "relevance_score": 0.7, "criteria_scores": {raw[:30]: 5.0}}
+    result = {"submission_id": "1", "novelty_score": 0.8, "aligned": True, "criteria_scores": {raw[:30]: 5.0}}
     filtered = f.apply([result], [raw])
     assert "_leakage_warning" in filtered[0]

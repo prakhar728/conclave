@@ -20,6 +20,8 @@ from core.models import Submission
 class HackathonSubmission(Submission):
     """Input model for the hackathon_novelty skill."""
     idea_text: str
+    idea_file: Optional[str] = None        # base64-encoded file content
+    idea_file_type: Optional[str] = None   # "docx", "markdown", or None (plain text)
     repo_summary: Optional[str] = None
     deck_text: Optional[str] = None
 
@@ -28,10 +30,9 @@ class NoveltyResult(BaseModel):
     """Final output for one submission after guardrails. This is what leaves the skill."""
     submission_id: str
     novelty_score: float = Field(ge=0.0, le=1.0)
-    relevance_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     aligned: Optional[bool] = None
     criteria_scores: dict[str, float] = {}
     # Analysis metadata — set by the agent based on which branch processed this submission
-    status: str = "analyzed"          # "analyzed" | "duplicate" | "quick_scored"
-    analysis_depth: str = "full"      # "full" | "quick" | "flagged"
+    status: str = "analyzed"          # "analyzed" | "duplicate"
+    analysis_depth: str = "full"      # "full" | "flagged"
     duplicate_of: Optional[str] = None  # submission_id of the original if status="duplicate"

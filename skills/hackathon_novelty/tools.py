@@ -2,15 +2,15 @@
 LangChain tool definitions for the hackathon_novelty skill.
 
 Tool groups (bound to different agent nodes):
+- INGEST_TOOLS: used by the ingestion node to extract and normalize text from various formats.
 - TRIAGE_TOOLS: used by the triage node to gather signals for classification decisions.
   Returns only derived stats and similarity landscape — no raw text.
-- ANALYSIS_TOOLS: used by the quick and analyze nodes for scoring.
-  Includes text-access tools that expose raw submission content to the LLM.
-- ALL_TOOLS: full set, used where full access is needed.
+- SCORE_TOOLS: used by the score node for evaluation. Includes text-access tools
+  that expose raw submission content to the LLM.
 
 What to edit here:
 - Add a new tool: define a @tool function, add to the appropriate group constant.
-- Change what triage sees: move tools between TRIAGE_TOOLS and ANALYSIS_TOOLS.
+- Change what triage sees: move tools between TRIAGE_TOOLS and SCORE_TOOLS.
 - Add a new tool group: define a new list constant and bind it in agent.py.
 
 Text tool convention:
@@ -25,6 +25,9 @@ If you add a tool that returns unusually sensitive data, consider whether it nee
 handling in guardrails.py.
 """
 from __future__ import annotations
+import base64
+import io
+import re
 import numpy as np
 from langchain_core.tools import tool
 
@@ -48,27 +51,87 @@ def set_context(deterministic_results: dict, submissions: dict):
     _submissions = submissions
 
 
+# --- Ingestion tools (text extraction + normalization) ---
+
+@tool
+def get_raw_text(submission_id: str) -> dict:
+    """Return the raw idea_text for a submission. Use when input is plain text under 300 words."""
+    if submission_id not in _submissions:
+        return {"error": f"Unknown submission_id: {submission_id}"}
+    sub = _submissions[submission_id]
+    return {"submission_id": submission_id, "text": sub.idea_text, "word_count": len(sub.idea_text.split())}
+
+
+@tool
+def parse_markdown(submission_id: str) -> dict:
+    """Strip markdown formatting and return plain text. Use when idea_file_type is 'markdown'."""
+    if submission_id not in _submissions:
+        return {"error": f"Unknown submission_id: {submission_id}"}
+    sub = _submissions[submission_id]
+    text = sub.idea_text
+    # Strip markdown: headers, bold, italic, links, code fences, bullets
+    text = re.sub(r'#{1,6}\s*', '', text)           # headers
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # bold
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)       # italic
+    text = re.sub(r'`([^`]+)`', r'\1', text)         # inline code
+    text = re.sub(r'```[\s\S]*?```', '', text)       # code blocks
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # links
+    text = re.sub(r'^[-*+]\s+', '', text, flags=re.MULTILINE)  # bullets
+    text = re.sub(r'\n{3,}', '\n\n', text).strip()   # excess newlines
+    return {"submission_id": submission_id, "text": text, "word_count": len(text.split())}
+
+
+@tool
+def extract_docx(submission_id: str) -> dict:
+    """Extract text from a base64-encoded docx file. Use when idea_file_type is 'docx'."""
+    if submission_id not in _submissions:
+        return {"error": f"Unknown submission_id: {submission_id}"}
+    sub = _submissions[submission_id]
+    if not sub.idea_file:
+        return {"error": "No idea_file provided", "submission_id": submission_id}
+    try:
+        from docx import Document
+        raw = base64.b64decode(sub.idea_file)
+        doc = Document(io.BytesIO(raw))
+        text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        return {"submission_id": submission_id, "text": text, "word_count": len(text.split())}
+    except Exception as e:
+        return {"error": f"Failed to extract docx: {e}", "submission_id": submission_id}
+
+
+@tool
+def summarize_text(submission_id: str, text: str) -> dict:
+    """Condense long text to ~150 words preserving the core idea, approach, and differentiators.
+    Use when extracted text exceeds 300 words."""
+    return {
+        "submission_id": submission_id,
+        "instruction": (
+            "Summarize the following text to ~150 words. Preserve: core idea, technical approach, "
+            "and key differentiators. Remove filler, redundancy, and tangential details."
+        ),
+        "text": text,
+        "word_count": len(text.split()),
+    }
+
+
 # --- Triage tools (stats + similarity landscape, no raw text) ---
 
 @tool
 def get_submission_summary(submission_id: str) -> dict:
     """Get deterministic analysis stats for a single submission.
 
-    Returns: novelty_score, percentile, cluster label, has_repo, has_deck.
+    Returns: novelty_score, percentile, cluster label.
     Use this first during triage to understand a submission's quantitative position.
     """
     ids = _deterministic_results["submission_ids"]
     if submission_id not in ids:
         return {"error": f"Unknown submission_id: {submission_id}"}
     idx = ids.index(submission_id)
-    sub = _submissions.get(submission_id)
     return {
         "submission_id": submission_id,
         "novelty_score": float(_deterministic_results["novelty_scores"][idx]),
         "percentile": float(_deterministic_results["percentiles"][idx]),
         "cluster": _deterministic_results["clusters"][idx],
-        "has_repo": sub is not None and sub.repo_summary is not None,
-        "has_deck": sub is not None and sub.deck_text is not None,
     }
 
 
@@ -80,8 +143,8 @@ def get_similar_submissions(submission_id: str) -> dict:
     submissions (excluding self), plus cluster_size (how many submissions share this cluster).
 
     Use this during triage to understand the similarity landscape:
-    - High similarity + small exclusive cluster = convergent thinking (consider analyze)
-    - High similarity + large shared cluster = likely derivative (consider flag)
+    - High similarity + small exclusive cluster = convergent thinking (still score)
+    - High similarity + large shared cluster = likely derivative (consider duplicate flag)
     """
     ids = _deterministic_results["submission_ids"]
     if submission_id not in ids:
@@ -139,7 +202,7 @@ def get_distribution_stats(metric: str) -> dict:
     }
 
 
-# --- Analysis tools (text access + scoring, used in quick/analyze nodes) ---
+# --- Scoring tools (text access + scoring, used in score node) ---
 
 @tool
 def get_idea_text(submission_id: str) -> dict:
@@ -216,6 +279,6 @@ def score_criterion(submission_id: str, criterion_name: str) -> dict:
 
 
 # Tool groups — bind these to the appropriate agent nodes in agent.py
+INGEST_TOOLS = [get_raw_text, parse_markdown, extract_docx, summarize_text]
 TRIAGE_TOOLS = [get_submission_summary, get_similar_submissions, get_distribution_stats]
-ANALYSIS_TOOLS = [get_idea_text, get_technical_details, get_deck_content, score_criterion]
-ALL_TOOLS = TRIAGE_TOOLS + ANALYSIS_TOOLS
+SCORE_TOOLS = [get_idea_text, score_criterion]

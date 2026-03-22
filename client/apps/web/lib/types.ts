@@ -51,11 +51,10 @@ export interface SubmitResponse {
 export interface NoveltyResult {
   submission_id: string
   novelty_score: number
-  percentile: number
-  cluster: string
+  aligned?: boolean
   criteria_scores: Record<string, number>
-  status: "analyzed" | "duplicate" | "quick_scored"
-  analysis_depth: "full" | "quick" | "flagged"
+  status: "analyzed" | "duplicate"
+  analysis_depth: "full" | "flagged"
   duplicate_of: string | null
   enclave_signature?: string
   attestation_quote?: string

@@ -33,7 +33,6 @@ def _fake_run_skill(inputs, params):
             {
                 "submission_id": s.submission_id,
                 "novelty_score": 0.7,
-                "relevance_score": 0.75,
                 "aligned": True,
                 "criteria_scores": {"originality": 7.0, "feasibility": 6.0},
                 "status": "analyzed",
@@ -405,16 +404,16 @@ def test_missing_agent_result_produces_error_status():
     ]
 
     det_output = {
-        "embeddings": np.zeros((5, 384)),
+        "embeddings": np.zeros((5, 768)),
         "sim_matrix": np.eye(5),
         "novelty_scores": np.array([0.5, 0.6, 0.7, 0.8, 0.9]),
         "percentiles": np.array([20.0, 40.0, 60.0, 80.0, 100.0]),
         "clusters": ["A", "A", "B", "B", "C"],
-        "relevance_scores": np.array([0.5, 0.6, 0.7, 0.8, 0.9]),
         "submission_ids": [f"sub_{i:03d}" for i in range(1, 6)],
     }
 
-    with patch("skills.hackathon_novelty.run_deterministic", return_value=det_output), \
+    with patch("skills.hackathon_novelty.run_ingest", return_value={}), \
+         patch("skills.hackathon_novelty.run_deterministic", return_value=det_output), \
          patch("skills.hackathon_novelty.run_agent", return_value=partial_results):
         response = run_skill(inputs, params)
 

@@ -19,3 +19,5 @@ cryptography>=42.0.0
 scipy
 pandas
 langgraph-cli[inmem]
+pdfplumber
+python-docx
