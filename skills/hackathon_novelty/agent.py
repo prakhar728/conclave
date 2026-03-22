@@ -159,10 +159,11 @@ def triage_node(state: AgentState) -> dict:
     # Include precomputed triage context so the LLM has rich signals upfront
     context_lines = []
     for sid, ctx in state["triage_context"].items():
+        relevance_str = f", relevance={ctx['relevance_score']:.3f}" if ctx.get('relevance_score') is not None else ""
         context_lines.append(
             f"  {sid}: novelty={ctx['novelty_score']:.3f}, percentile={ctx['percentile']:.1f}, "
             f"cluster={ctx['cluster']} (size {ctx['cluster_size']}), "
-            f"has_repo={ctx['has_repo']}, has_deck={ctx['has_deck']}"
+            f"has_repo={ctx['has_repo']}, has_deck={ctx['has_deck']}{relevance_str}"
         )
     context_str = "\n".join(context_lines)
     human_msg = (

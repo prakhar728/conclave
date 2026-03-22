@@ -28,8 +28,20 @@ from core.models import OperatorConfig
 from skills.hackathon_novelty.config import MIN_SUBMISSIONS, INIT_MODEL
 
 
-# Bump when changing _SYSTEM_PROMPT. Flows into LangSmith traces and eval logs.
-INIT_PROMPT_VERSION = "v2"
+# Bump when changing _SYSTEM_PROMPT or _GREETING_TEMPLATE.
+INIT_PROMPT_VERSION = "v3"
+
+
+_GREETING_TEMPLATE = (
+    "Welcome to hackathon evaluation setup.\n\n"
+    "Please provide the following:\n\n"
+    "1. **Evaluation criteria** with weights summing to 1.0\n"
+    '   Example: {"originality": 0.4, "feasibility": 0.3, "impact": 0.3}\n\n'
+    "2. **(Optional) Guidelines** — judging instructions\n"
+    '   Example: "Focus on AI/ML innovations"\n\n'
+    f"3. **(Optional) Threshold** — minimum submissions before auto-evaluation (default: {MIN_SUBMISSIONS})\n\n"
+    "You can provide everything in one message."
+)
 
 
 _SYSTEM_PROMPT = (
@@ -71,9 +83,18 @@ def hackathon_init_handler(message: str, conversation: list[dict]) -> dict:
     Called by the API on each POST /init. The API passes the accumulated
     conversation; this handler appends the new messages and returns the result.
     """
-    # Initialise conversation with system prompt on first turn
+    # First turn: return fixed greeting immediately (no LLM call).
+    # Seed the conversation so DeepSeek sees the greeting as its own message on turn 2+.
     if not conversation:
-        conversation = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        conversation = [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "ai", "content": _GREETING_TEMPLATE},
+        ]
+        return {
+            "status": "configuring",
+            "message": _GREETING_TEMPLATE,
+            "conversation": conversation,
+        }
 
     conversation = conversation + [{"role": "human", "content": message}]
 
@@ -125,9 +146,15 @@ def hackathon_init_handler(message: str, conversation: list[dict]) -> dict:
             }
 
         config = OperatorConfig(criteria=criteria, guidelines=guidelines)
+        ready_message = (
+            f"Configuration saved.\n"
+            f"Criteria: {json.dumps(criteria)}\n"
+            f"Guidelines: {guidelines or '(none)'}\n"
+            f"Threshold: {threshold} submissions"
+        )
         return {
             "status": "ready",
-            "message": ai_text,
+            "message": ready_message,
             "conversation": conversation,
             "config": config,
             "threshold": threshold,

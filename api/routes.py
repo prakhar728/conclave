@@ -317,7 +317,10 @@ def get_results(submission_id: str, request: Request):
     if role == "user":
         if submission_id not in token_info["submission_ids"]:
             raise HTTPException(status_code=403, detail="Access denied: submission not owned by this token")
-        return instance_results[submission_id]
+        # Participant view: filtered to skill-declared user_output_keys
+        card = _skill_router.get_card(_instances[instance_id]["skill_name"])
+        result = instance_results[submission_id]
+        return {k: result[k] for k in card.user_output_keys if k in result}
 
     # admin: unrestricted access within the instance
     return instance_results[submission_id]

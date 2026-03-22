@@ -30,9 +30,9 @@ class HackathonNoveltyFilter(OutputFilterBase):
             lo, hi = SCORE_BOUNDS["novelty_score"]
             result["novelty_score"] = max(lo, min(hi, result["novelty_score"]))
 
-        if "percentile" in result:
-            lo, hi = SCORE_BOUNDS["percentile"]
-            result["percentile"] = max(lo, min(hi, result["percentile"]))
+        if "relevance_score" in result and result["relevance_score"] is not None:
+            lo, hi = SCORE_BOUNDS["relevance_score"]
+            result["relevance_score"] = max(lo, min(hi, result["relevance_score"]))
 
         if "criteria_scores" in result and isinstance(result["criteria_scores"], dict):
             lo, hi = SCORE_BOUNDS["criteria_scores"]

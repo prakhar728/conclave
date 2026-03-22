@@ -8,6 +8,7 @@ from skills.hackathon_novelty.deterministic import (
     pairwise_similarity,
     compute_novelty_scores,
     compute_percentiles,
+    compute_relevance_scores,
     cluster_submissions,
     run_deterministic,
 )
@@ -18,13 +19,8 @@ def _make_submissions() -> list[HackathonSubmission]:
     return [HackathonSubmission(**s) for s in FAKE_SUBMISSIONS]
 
 
-def test_fuse_text_concatenates_all_fields():
+def test_fuse_text_returns_idea_only():
     s = HackathonSubmission(submission_id="x", idea_text="idea", repo_summary="repo", deck_text="deck")
-    assert fuse_text(s) == "idea repo deck"
-
-
-def test_fuse_text_skips_none():
-    s = HackathonSubmission(submission_id="x", idea_text="idea")
     assert fuse_text(s) == "idea"
 
 
@@ -67,6 +63,17 @@ def test_run_deterministic_end_to_end():
     assert result["percentiles"].shape[0] == len(subs)
     assert len(result["clusters"]) == len(subs)
     assert len(result["submission_ids"]) == len(subs)
+    assert "relevance_scores" in result
+    # No guidelines/criteria passed → relevance_scores is None
+    assert result["relevance_scores"] is None
+
+
+def test_run_deterministic_with_relevance():
+    subs = _make_submissions()
+    result = run_deterministic(subs, guidelines="Focus on AI/ML", criteria={"originality": 0.5, "feasibility": 0.5})
+    assert result["relevance_scores"] is not None
+    assert result["relevance_scores"].shape[0] == len(subs)
+    assert all(0.0 <= s <= 1.0 for s in result["relevance_scores"])
 
 
 # --- Agent + Guardrails tests ---
@@ -95,8 +102,9 @@ def test_run_skill_with_mocked_llm():
     for r in response.results:
         assert "submission_id" in r
         assert 0.0 <= r["novelty_score"] <= 1.0
-        assert 0.0 <= r["percentile"] <= 100.0
-        assert isinstance(r["cluster"], str)
+        assert "percentile" not in r
+        assert "cluster" not in r
+        assert "relevance_score" in r
         assert "criteria_scores" in r
 
 
@@ -118,16 +126,16 @@ def test_filter_strips_extra_keys():
 
 def test_filter_clamps_out_of_bounds():
     f = HackathonNoveltyFilter()
-    result = {"novelty_score": 1.5, "percentile": -10.0, "criteria_scores": {"originality": 15.0}}
+    result = {"novelty_score": 1.5, "relevance_score": 1.5, "criteria_scores": {"originality": 15.0}}
     clamped = f.check_bounds(result)
     assert clamped["novelty_score"] == 1.0
-    assert clamped["percentile"] == 0.0
+    assert clamped["relevance_score"] == 1.0
     assert clamped["criteria_scores"]["originality"] == 10.0
 
 
 def test_filter_detects_leakage():
     f = HackathonNoveltyFilter()
     raw = "An AI-powered code review tool that uses LLMs to detect security vulnerabilities"
-    result = {"submission_id": "1", "novelty_score": 0.8, "percentile": 75.0, "cluster": raw[:30], "criteria_scores": {}}
+    result = {"submission_id": "1", "novelty_score": 0.8, "relevance_score": 0.7, "criteria_scores": {raw[:30]: 5.0}}
     filtered = f.apply([result], [raw])
     assert "_leakage_warning" in filtered[0]

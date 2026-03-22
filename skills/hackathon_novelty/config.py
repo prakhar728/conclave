@@ -27,8 +27,8 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 ALLOWED_OUTPUT_KEYS = {
     "submission_id",
     "novelty_score",
-    "percentile",
-    "cluster",
+    "relevance_score",
+    "aligned",
     "criteria_scores",
     "status",
     "analysis_depth",
@@ -37,7 +37,7 @@ ALLOWED_OUTPUT_KEYS = {
 
 SCORE_BOUNDS = {
     "novelty_score": (0.0, 1.0),
-    "percentile": (0.0, 100.0),
+    "relevance_score": (0.0, 1.0),
     "criteria_scores": (0.0, 10.0),
 }
 
@@ -49,6 +49,14 @@ MIN_SUBMISSIONS = 5
 # material availability, similarity patterns) before making its classification decision.
 SIMILARITY_DUPLICATE_THRESHOLD = 0.95
 LOW_NOVELTY_THRESHOLD = 0.1
+
+# Participant-facing output — only Conclave-unique signals.
+# Admin sees ALLOWED_OUTPUT_KEYS (everything). Users see USER_OUTPUT_KEYS.
+USER_OUTPUT_KEYS = {"submission_id", "novelty_score", "aligned"}
+
+# Relevance threshold for the "aligned" boolean flag.
+# Below this → aligned=False (submission doesn't match hackathon theme).
+RELEVANCE_THRESHOLD = 0.15
 
 # Per-node model overrides — set via CONCLAVE_*_MODEL env vars.
 # Empty string falls back to CONCLAVE_DEFAULT_MODEL (or DeepSeek-V3.1 if unset).
