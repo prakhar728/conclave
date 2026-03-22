@@ -1,7 +1,8 @@
 """
-Unit tests for confidential_data_procurement — deterministic layer.
+Unit tests for confidential_data_procurement.
 Tests cover: metrics computation, critical checks, component scores,
-quality score formula, price formula, deal condition, and run_deterministic.
+quality score formula, price formula, deal condition, run_deterministic,
+guardrails (filter + validator), init handler, run_skill, and skill_card.
 """
 from __future__ import annotations
 
@@ -24,8 +25,8 @@ from skills.confidential_data_procurement.deterministic import (
     compute_quality_score,
     run_deterministic,
 )
-from skills.confidential_data_procurement.ingest import _datasets, cleanup
-from skills.confidential_data_procurement.models import BuyerPolicy
+from skills.confidential_data_procurement.ingest import _datasets, cleanup, procurement_upload_handler
+from skills.confidential_data_procurement.models import BuyerPolicy, SupplierSubmission
 
 
 # ---------------------------------------------------------------------------
@@ -617,3 +618,118 @@ class TestProcurementInitHandler:
             result = procurement_init_handler("my policy", _SEEDED_CONV)
         # seeded (2) + human (1) + ai (1) = 4
         assert len(result["conversation"]) == 4
+
+
+# ---------------------------------------------------------------------------
+# run_skill + skill_card
+# ---------------------------------------------------------------------------
+
+from skills.confidential_data_procurement import run_skill, skill_card
+
+
+class TestRunSkill:
+    def test_good_dataset_returns_deal(self):
+        df = _make_df(rows=200)
+        policy = _make_policy(min_rows=100, max_budget=5000.0, base_price=500.0)
+        dataset_id = _register_df(df)
+        try:
+            sub = SupplierSubmission(
+                submission_id="sub-good",
+                dataset_id=dataset_id,
+                dataset_name="fraud_data.csv",
+                reserve_price=1000.0,
+            )
+            resp = run_skill([sub], policy)
+            assert resp.skill == "confidential_data_procurement"
+            assert len(resp.results) == 1
+            r = resp.results[0]
+            assert r["deal"] is True
+            assert r["settlement_status"] == "pending_approval"
+            assert r["proposed_payment"] >= 500.0
+            assert r["quality_score"] > 0.5
+        finally:
+            cleanup(dataset_id)
+
+    def test_critical_failure_returns_rejected(self):
+        df = _make_df(rows=50)
+        df["ssn"] = "xxx"
+        policy = _make_policy()
+        dataset_id = _register_df(df)
+        try:
+            sub = SupplierSubmission(
+                submission_id="sub-bad",
+                dataset_id=dataset_id,
+                dataset_name="bad_data.csv",
+                reserve_price=100.0,
+            )
+            resp = run_skill([sub], policy)
+            r = resp.results[0]
+            assert r["deal"] is False
+            assert r["settlement_status"] == "rejected"
+            assert r["quality_score"] == 0.0
+        finally:
+            cleanup(dataset_id)
+
+    def test_reserve_above_payment_no_deal(self):
+        df = _make_df(rows=150)
+        policy = _make_policy(min_rows=100, max_budget=1000.0, base_price=0.0)
+        dataset_id = _register_df(df)
+        try:
+            sub = SupplierSubmission(
+                submission_id="sub-expensive",
+                dataset_id=dataset_id,
+                dataset_name="data.csv",
+                reserve_price=9999.0,
+            )
+            resp = run_skill([sub], policy)
+            r = resp.results[0]
+            assert r["deal"] is False
+            assert r["settlement_status"] == "rejected"
+        finally:
+            cleanup(dataset_id)
+
+    def test_internal_fields_stripped_by_guardrails(self):
+        """revised_budget and revised_reserve should not appear in output."""
+        df = _make_df(rows=200)
+        policy = _make_policy(min_rows=100, max_budget=5000.0, base_price=500.0)
+        dataset_id = _register_df(df)
+        try:
+            sub = SupplierSubmission(
+                submission_id="sub-internal",
+                dataset_id=dataset_id,
+                dataset_name="data.csv",
+                reserve_price=100.0,
+            )
+            resp = run_skill([sub], policy)
+            r = resp.results[0]
+            assert "revised_budget" not in r
+            assert "revised_reserve" not in r
+        finally:
+            cleanup(dataset_id)
+
+
+class TestSkillCard:
+    def test_card_name(self):
+        assert skill_card.name == "confidential_data_procurement"
+
+    def test_card_has_required_fields(self):
+        assert skill_card.run is run_skill
+        assert skill_card.input_model is SupplierSubmission
+        assert skill_card.init_handler is procurement_init_handler
+        assert skill_card.upload_handler is procurement_upload_handler
+
+    def test_output_keys_superset_of_user_keys(self):
+        assert skill_card.user_output_keys.issubset(skill_card.output_keys)
+
+    def test_quality_score_buyer_only(self):
+        assert "quality_score" in skill_card.output_keys
+        assert "quality_score" not in skill_card.user_output_keys
+
+    def test_metadata_serializable(self):
+        meta = skill_card.metadata()
+        assert meta["name"] == "confidential_data_procurement"
+        assert "quality_score" in meta["output_keys"]
+        assert "quality_score" not in meta["user_output_keys"]
+
+    def test_threshold_is_one(self):
+        assert skill_card.config["min_submissions"] == 1

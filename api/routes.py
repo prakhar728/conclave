@@ -34,8 +34,11 @@ _skill_router = SkillRouter()
 
 def register_skills():
     """Register all skills. Called at startup."""
-    from skills.hackathon_novelty import skill_card
-    _skill_router.register(skill_card)
+    from skills.hackathon_novelty import skill_card as hackathon_card
+    _skill_router.register(hackathon_card)
+
+    from skills.confidential_data_procurement import skill_card as procurement_card
+    _skill_router.register(procurement_card)
 
 
 # --- Helpers ---
