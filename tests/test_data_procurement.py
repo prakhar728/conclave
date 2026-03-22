@@ -375,3 +375,120 @@ class TestRunDeterministic:
         policy = _make_policy()
         with pytest.raises(KeyError):
             run_deterministic("nonexistent_id", policy, reserve_price=100.0)
+
+
+# ---------------------------------------------------------------------------
+# ProcurementFilter
+# ---------------------------------------------------------------------------
+
+from skills.confidential_data_procurement.guardrails import (
+    ProcurementFilter,
+    validate_tool_output,
+)
+
+
+class TestProcurementFilter:
+    def _result(self) -> dict:
+        return {
+            "submission_id": "sub-1",
+            "deal": True,
+            "quality_score": 0.85,
+            "proposed_payment": 3000.0,
+            "hard_constraints_pass": True,
+            "settlement_status": "authorized",
+            "release_token": "tok-abc",
+            "notes": [],
+            "explanation": "Looks good.",
+            "claim_verification": None,
+            "schema_matching": None,
+            "buyer_response": "accept",
+            "supplier_response": "accept",
+            "renegotiation_used": False,
+        }
+
+    def test_buyer_sees_quality_score(self):
+        f = ProcurementFilter(role="admin")
+        out = f.filter_keys(self._result())
+        assert "quality_score" in out
+
+    def test_supplier_hides_quality_score(self):
+        f = ProcurementFilter(role="user")
+        out = f.filter_keys(self._result())
+        assert "quality_score" not in out
+        assert "hard_constraints_pass" not in out
+
+    def test_supplier_still_sees_payment(self):
+        f = ProcurementFilter(role="user")
+        out = f.filter_keys(self._result())
+        assert "proposed_payment" in out
+        assert "deal" in out
+
+    def test_check_bounds_clamps_high(self):
+        f = ProcurementFilter(role="admin")
+        r = {"quality_score": 1.5}
+        assert f.check_bounds(r)["quality_score"] == 1.0
+
+    def test_check_bounds_clamps_low(self):
+        f = ProcurementFilter(role="admin")
+        r = {"quality_score": -0.3}
+        assert f.check_bounds(r)["quality_score"] == 0.0
+
+    def test_check_bounds_passes_valid(self):
+        f = ProcurementFilter(role="admin")
+        r = {"quality_score": 0.72}
+        assert f.check_bounds(r)["quality_score"] == pytest.approx(0.72)
+
+    def test_unknown_keys_stripped(self):
+        f = ProcurementFilter(role="admin")
+        r = self._result()
+        r["_internal_secret"] = "max_budget=9000"
+        out = f.filter_keys(r)
+        assert "_internal_secret" not in out
+
+    def test_leakage_flagged_in_apply(self):
+        f = ProcurementFilter(role="admin")
+        result = self._result()
+        # Inject a long substring into explanation that also appears in raw_inputs
+        leaked = "SENSITIVE_CELL_VALUE_XYZ_1234567890"
+        result["explanation"] = f"The data shows {leaked} is common."
+        filtered = f.apply([result], [leaked])
+        assert "_leakage_warning" in filtered[0]
+
+
+# ---------------------------------------------------------------------------
+# validate_tool_output
+# ---------------------------------------------------------------------------
+
+class TestValidateToolOutput:
+    def test_clean_stats_pass(self):
+        output = "count: 150\nmean: 4.2\nstd: 1.1\nmin: 0.0\nmax: 10.0"
+        assert validate_tool_output(output) == output
+
+    def test_oversized_raises(self):
+        big = "x" * 5000
+        with pytest.raises(ValueError, match="too large"):
+            validate_tool_output(big)
+
+    def test_raw_rows_raises(self):
+        # 6 CSV-like lines — over the threshold of 5
+        rows = "\n".join(f"txn_{i},100.{i},0" for i in range(6))
+        with pytest.raises(ValueError, match="CSV-like"):
+            validate_tool_output(rows)
+
+    def test_exactly_at_raw_row_limit_passes(self):
+        # exactly MAX_RAW_ROW_LINES (5) CSV-like lines — should pass
+        rows = "\n".join(f"txn_{i},100.{i},0" for i in range(5))
+        assert validate_tool_output(rows) == rows
+
+    def test_high_cardinality_raises(self):
+        # 51 bullet items — over the threshold of 50
+        items = "\n".join(f"- value_{i}: {i}" for i in range(51))
+        with pytest.raises(ValueError, match="enumerates"):
+            validate_tool_output(items)
+
+    def test_exactly_at_cardinality_limit_passes(self):
+        items = "\n".join(f"- value_{i}: {i}" for i in range(50))
+        assert validate_tool_output(items) == items
+
+    def test_empty_string_passes(self):
+        assert validate_tool_output("") == ""
