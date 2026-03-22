@@ -1,8 +1,6 @@
 services:
   conclave:
-    build: .
+    image: prakharojha/conclave:latest
     ports:
       - "8000:8000"
-    env_file:
-      - .env
     restart: always
