@@ -8,7 +8,7 @@ What to edit here:
 - MIN_SUBMISSIONS: minimum batch size for analysis to run
 - SIMILARITY_DUPLICATE_THRESHOLD: guidance value passed to triage LLM prompt (not a hard cutoff)
 - LOW_NOVELTY_THRESHOLD: guidance value passed to triage LLM prompt (not a hard cutoff)
-- *_MODEL: per-node model overrides (set via CONCLAVE_*_MODEL env vars)
+- *_MODEL: per-node model overrides (set in skills/hackathon_novelty/.env)
 
 Consumed by:
 - guardrails.py (ALLOWED_OUTPUT_KEYS, SCORE_BOUNDS, MIN_LEAKAGE_SUBSTRING_LENGTH)
@@ -17,6 +17,12 @@ Consumed by:
 - agent.py + init.py (*_MODEL constants)
 """
 import os
+from dotenv import load_dotenv
+
+# Load skill-specific env vars before reading them below.
+# This file lives at skills/hackathon_novelty/.env (gitignored).
+# Global .env only contains API keys and infrastructure config.
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 ALLOWED_OUTPUT_KEYS = {
     "submission_id",
