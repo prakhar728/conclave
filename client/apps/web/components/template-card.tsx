@@ -41,6 +41,29 @@ export const TEMPLATE_CATALOG: Template[] = [
     comesOut: ["Fit score", "Skills overlap"],
     neverLeaves: ["Candidate details", "Salary data"],
   },
+  {
+    name: "Confidential Data Procurement",
+    skill_name: "confidential_procurement",
+    icon: "🔐",
+    status: "live",
+    goesIn: [
+      "Buyer policy",
+      "Dataset upload",
+      "Seller claims",
+      "Reserve price",
+    ],
+    comesOut: [
+      "Bounded evaluation report",
+      "Proposed payment",
+      "Negotiation outcome",
+      "Download token",
+    ],
+    neverLeaves: [
+      "Raw dataset rows",
+      "Sensitive fields",
+      "Supplier private data before agreement",
+    ],
+  },
 ]
 
 interface TemplateCardProps {
