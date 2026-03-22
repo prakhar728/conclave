@@ -29,6 +29,7 @@ class SkillCard:
     run: Callable                        # the run_skill() entry point
     input_model: Type[BaseModel]         # Pydantic model for this skill's inputs
     output_keys: set                     # allowed output keys (mirrors ALLOWED_OUTPUT_KEYS)
+    user_output_keys: set = field(default_factory=set)  # keys visible to user role (subset of output_keys)
     config: dict = field(default_factory=dict)          # skill-specific config params
     trigger_modes: list = field(default_factory=list)   # supported trigger declarations
     roles: dict = field(default_factory=dict)           # admin + user role declarations
@@ -45,6 +46,7 @@ class SkillCard:
             "version": self.version,
             "input_schema": self.input_model.model_json_schema(),
             "output_keys": sorted(self.output_keys),
+            "user_output_keys": sorted(self.user_output_keys),
             "config": self.config,
             "trigger_modes": self.trigger_modes,
             "roles": self.roles,

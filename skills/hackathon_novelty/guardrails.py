@@ -25,14 +25,10 @@ class HackathonNoveltyFilter(OutputFilterBase):
         )
 
     def check_bounds(self, result: dict) -> dict:
-        """Clamp numeric scores to valid ranges. String fields pass through."""
+        """Clamp numeric scores to valid ranges. String/bool fields pass through."""
         if "novelty_score" in result:
             lo, hi = SCORE_BOUNDS["novelty_score"]
             result["novelty_score"] = max(lo, min(hi, result["novelty_score"]))
-
-        if "percentile" in result:
-            lo, hi = SCORE_BOUNDS["percentile"]
-            result["percentile"] = max(lo, min(hi, result["percentile"]))
 
         if "criteria_scores" in result and isinstance(result["criteria_scores"], dict):
             lo, hi = SCORE_BOUNDS["criteria_scores"]
@@ -41,5 +37,5 @@ class HackathonNoveltyFilter(OutputFilterBase):
                 for k, v in result["criteria_scores"].items()
             }
 
-        # status, analysis_depth, duplicate_of are strings — no bounds to check
+        # aligned (bool), status, analysis_depth, duplicate_of are non-numeric — no bounds
         return result

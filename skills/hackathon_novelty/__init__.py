@@ -1,9 +1,10 @@
 """
 Entry point for the hackathon_novelty skill.
 
-3-layer pipeline:
+4-layer pipeline:
+    0. ingest.py         — agentic text extraction + normalization (LLM)
     1. deterministic.py  — embeddings, similarity, novelty scores, clustering (no LLM)
-    2. agent.py          — multi-node LangGraph graph (triage → router → flag/quick/analyze → finalize)
+    2. agent.py          — multi-node LangGraph graph (triage → router → flag/score → finalize)
     3. guardrails.py     — key whitelist, score clamping, leakage detection
 
 What to edit here:
@@ -19,15 +20,16 @@ from core.models import OperatorConfig, SkillResponse
 from core.skill_card import SkillCard
 from skills.hackathon_novelty.models import HackathonSubmission, NoveltyResult
 from skills.hackathon_novelty.deterministic import run_deterministic
+from skills.hackathon_novelty.ingest import run_ingest
 from skills.hackathon_novelty.tools import set_context
 from skills.hackathon_novelty.agent import run_agent
 from skills.hackathon_novelty.guardrails import HackathonNoveltyFilter
-from skills.hackathon_novelty.config import ALLOWED_OUTPUT_KEYS, MIN_SUBMISSIONS
+from skills.hackathon_novelty.config import ALLOWED_OUTPUT_KEYS, USER_OUTPUT_KEYS, MIN_SUBMISSIONS, SIMILARITY_DUPLICATE_THRESHOLD
 from skills.hackathon_novelty.init import hackathon_init_handler
 
 
 def run_skill(inputs: list[HackathonSubmission], params: OperatorConfig) -> SkillResponse:
-    """Full 3-layer pipeline: deterministic → agent (multi-node graph) → guardrails → response."""
+    """Full 4-layer pipeline: ingest → deterministic → agent (multi-node graph) → guardrails → response."""
 
     if len(inputs) < MIN_SUBMISSIONS:
         return SkillResponse(
@@ -35,26 +37,45 @@ def run_skill(inputs: list[HackathonSubmission], params: OperatorConfig) -> Skil
             results=[{"submission_id": s.submission_id, "status": "insufficient_submissions"} for s in inputs],
         )
 
-    # Layer 1: Deterministic
-    det = run_deterministic(inputs)
+    # Layer 0: Ingestion — normalize/extract text from any format
+    normalized = run_ingest(inputs)
+    for sub in inputs:
+        if sub.submission_id in normalized:
+            sub.idea_text = normalized[sub.submission_id]
+
+    # Layer 1: Deterministic (now uses normalized text for embeddings)
+    det = run_deterministic(inputs, guidelines=params.guidelines, criteria=params.criteria)
 
     # Build submissions map and set tool context
     submissions_map = {s.submission_id: s for s in inputs}
     set_context(det, submissions_map)
 
-    # Build triage_context — rich signals the triage LLM uses to classify each submission
-    # Add more signals here as new tools or deterministic outputs become available
+    # Build triage_context — rich signals the triage LLM uses to classify + judge relevance
     clusters = det["clusters"]
+    sim_matrix = det["sim_matrix"]
+    submission_ids = det["submission_ids"]
+
+    # Pre-compute high-similarity pairs so triage LLM knows which to confirm as duplicates
+    near_duplicate_pairs = []
+    n = len(submission_ids)
+    for i in range(n):
+        for j in range(i + 1, n):
+            sim = float(sim_matrix[i, j])
+            if sim >= SIMILARITY_DUPLICATE_THRESHOLD:
+                near_duplicate_pairs.append((submission_ids[i], submission_ids[j], sim))
+
     triage_context = {}
-    for i, sid in enumerate(det["submission_ids"]):
-        sub = submissions_map[sid]
+    for i, sid in enumerate(submission_ids):
         triage_context[sid] = {
             "novelty_score": float(det["novelty_scores"][i]),
             "percentile": float(det["percentiles"][i]),
             "cluster": clusters[i],
             "cluster_size": clusters.count(clusters[i]),
-            "has_repo": sub.repo_summary is not None,
-            "has_deck": sub.deck_text is not None,
+            "idea_text": submissions_map[sid].idea_text,
+            "near_duplicates": [
+                {"other_id": a if b == sid else b, "similarity": round(sim, 3)}
+                for a, b, sim in near_duplicate_pairs if sid in (a, b)
+            ],
         }
 
     # Layer 2: Agent (multi-node graph)
@@ -73,8 +94,7 @@ def run_skill(inputs: list[HackathonSubmission], params: OperatorConfig) -> Skil
         result = NoveltyResult(
             submission_id=sid,
             novelty_score=float(det["novelty_scores"][i]),
-            percentile=float(det["percentiles"][i]),
-            cluster=det["clusters"][i],
+            aligned=ar.get("aligned"),
             criteria_scores=ar.get("criteria_scores", {}),
             status=ar.get("status", "analyzed") if ar else "error",
             analysis_depth=ar.get("analysis_depth", "full"),
@@ -93,14 +113,15 @@ def run_skill(inputs: list[HackathonSubmission], params: OperatorConfig) -> Skil
 skill_card = SkillCard(
     name="hackathon_novelty",
     description=(
-        "Scores hackathon submissions for novelty using embedding similarity, "
-        "KMeans clustering, and a multi-node LangGraph agent (triage → analysis → guardrails). "
+        "Scores hackathon submissions for novelty using agentic ingestion, embedding similarity, "
+        "KMeans clustering, and a multi-node LangGraph agent (ingest → triage → score → guardrails). "
         "Raw submission content is accessible to the LLM inside the TEE; "
         "only derived outputs leave the pipeline."
     ),
     run=run_skill,
     input_model=HackathonSubmission,
     output_keys=ALLOWED_OUTPUT_KEYS,
+    user_output_keys=USER_OUTPUT_KEYS,
     config={"min_submissions": MIN_SUBMISSIONS},
     trigger_modes=[
         {
@@ -153,8 +174,9 @@ skill_card = SkillCard(
         "- idea_text (required): A description of their hackathon idea.\n"
         "- repo_summary (optional): Technical details or a summary of their implementation.\n"
         "- deck_text (optional): Pitch deck or business case content.\n\n"
-        "Each user receives: novelty_score (0-1), percentile rank, cluster assignment, "
-        "per-criteria scores (0-10), and analysis status. They never see other teams' data."
+        "Each user receives: novelty_score (0-1, how unique your idea is compared to others) "
+        "and an alignment flag (whether your idea fits the hackathon theme). "
+        "They never see other teams' submissions or scores."
     ),
     init_handler=hackathon_init_handler,
     user_display={

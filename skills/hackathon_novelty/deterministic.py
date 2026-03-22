@@ -13,18 +13,13 @@ _model: SentenceTransformer | None = None
 def _get_model() -> SentenceTransformer:
     global _model
     if _model is None:
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
+        _model = SentenceTransformer("all-mpnet-base-v2")
     return _model
 
 
 def fuse_text(submission: HackathonSubmission) -> str:
-    """Concatenate all text fields into a single string for embedding."""
-    parts = [submission.idea_text]
-    if submission.repo_summary:
-        parts.append(submission.repo_summary)
-    if submission.deck_text:
-        parts.append(submission.deck_text)
-    return " ".join(parts)
+    """Idea text only — similarity/novelty based on core idea, not supporting materials."""
+    return submission.idea_text
 
 
 def compute_embeddings(texts: list[str]) -> np.ndarray:
@@ -67,14 +62,18 @@ def cluster_submissions(embeddings: np.ndarray) -> list[str]:
     return [label_names[l] for l in labels]
 
 
-def run_deterministic(submissions: list[HackathonSubmission]) -> dict:
+def run_deterministic(
+    submissions: list[HackathonSubmission],
+    guidelines: str = "",
+    criteria: dict[str, float] | None = None,
+) -> dict:
     """
     Full deterministic pipeline. Returns dict with:
     - embeddings: np.ndarray (N, D)
     - sim_matrix: np.ndarray (N, N)
     - novelty_scores: np.ndarray (N,)
-    - percentiles: np.ndarray (N,)
-    - clusters: list[str] (N,)
+    - percentiles: np.ndarray (N,)       — internal, used by triage_context
+    - clusters: list[str] (N,)           — internal, used by triage_context
     - submission_ids: list[str] (N,)
     """
     texts = [fuse_text(s) for s in submissions]
