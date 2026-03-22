@@ -251,7 +251,7 @@ def procurement_init_handler(message: str, conversation: list[dict]) -> dict:
         f"Max duplicate rate: {policy.max_duplicate_rate:.0%}\n"
         f"Budget: ${policy.base_price:,.2f} – ${policy.max_budget:,.2f}\n"
         + (f"Label column: {policy.label_column} (≥ {policy.min_label_rate:.1%})\n"
-           if policy.label_column else "")
+           if policy.label_column and policy.min_label_rate is not None else "")
         + (f"Forbidden columns: {', '.join(policy.forbidden_columns)}\n"
            if policy.forbidden_columns else "")
         + "\nShare the instance link with your supplier to begin."

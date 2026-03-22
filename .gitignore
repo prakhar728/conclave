@@ -16,4 +16,3 @@ venv/
 eval_results/
 scripts/
 tests/fixtures/
-tests/demo_matrix.json

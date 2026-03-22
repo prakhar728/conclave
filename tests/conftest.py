@@ -41,41 +41,70 @@ def pytest_collection_modifyitems(config, items):
 
 # ---------------------------------------------------------------------------
 # Dataset fixture
+#
+# Loads dazzle-nu/CIS435-CreditCardFraudDetection from HuggingFace.
+# Normalises to: transaction_id, amount, is_fraud, category, merchant
+# PII columns retained but NOT included by default — seller variants
+# can add them (dob, cc_num) to trigger the forbidden-column rejection.
+#
+# Falls back to synthetic data if HuggingFace is unavailable (e.g. CI).
 # ---------------------------------------------------------------------------
 
-def _generate_synthetic_df(n: int = 800) -> pd.DataFrame:
+_HF_DATASET = "dazzle-nu/CIS435-CreditCardFraudDetection"
+_SAMPLE_N   = 1000
+
+
+def _generate_synthetic_df(n: int = _SAMPLE_N) -> pd.DataFrame:
     import numpy as np
     rng = np.random.default_rng(42)
     return pd.DataFrame({
-        "transaction_id":    [f"txn_{i:05d}" for i in range(n)],
-        "amount":            rng.uniform(1.0, 500.0, n).round(2),
-        "merchant_category": rng.choice(["grocery", "gas", "restaurant", "travel", "online"], n),
-        "is_fraud":          (rng.uniform(0, 1, n) < 0.04).astype(int),
+        "transaction_id": [f"txn_{i:05d}" for i in range(n)],
+        "amount":         rng.uniform(1.0, 500.0, n).round(2),
+        "category":       rng.choice(["grocery", "gas", "restaurant", "travel", "online"], n),
+        "merchant":       [f"merchant_{i % 50}" for i in range(n)],
+        "is_fraud":       (rng.uniform(0, 1, n) < 0.04).astype(int),
+        # PII cols — available for forbidden-column tests
+        "dob":            [f"19{(i % 60 + 40):02d}-01-01" for i in range(n)],
+        "cc_num":         [f"4{i:015d}" for i in range(n)],
     })
+
+
+def _load_hf_df() -> pd.DataFrame | None:
+    try:
+        from datasets import load_dataset
+        ds = load_dataset(_HF_DATASET, split="train")
+        df = ds.to_pandas()
+
+        # Normalise column names
+        df = df.rename(columns={"trans_num": "transaction_id", "amt": "amount"})
+        if "transaction_id" not in df.columns:
+            df.insert(0, "transaction_id", [f"txn_{i:06d}" for i in range(len(df))])
+
+        required = {"transaction_id", "amount", "is_fraud"}
+        if not required.issubset(df.columns):
+            return None
+
+        # Stratified sample: keep fraud/non-fraud ratio, cap at _SAMPLE_N
+        fraud    = df[df["is_fraud"] == 1].sample(min(40, (df["is_fraud"] == 1).sum()), random_state=42)
+        nonfraud = df[df["is_fraud"] == 0].sample(_SAMPLE_N - len(fraud), random_state=42)
+        df = pd.concat([fraud, nonfraud]).sample(frac=1, random_state=42).reset_index(drop=True)
+
+        print(f"[conftest] HuggingFace dataset loaded: {len(df)} rows, "
+              f"fraud rate={df['is_fraud'].mean():.1%}, columns={list(df.columns)}")
+        return df
+    except Exception as e:
+        print(f"[conftest] HuggingFace load failed ({e}) — using synthetic data")
+        return None
 
 
 @pytest.fixture(scope="session")
 def base_df() -> pd.DataFrame:
-    """Session-scoped clean fraud-like DataFrame (~800 rows, synthetic fallback)."""
-    url = "https://raw.githubusercontent.com/dsrscientist/dataset1/master/creditcard_small.csv"
-    try:
-        import io, requests
-        resp = requests.get(url, timeout=10)
-        if resp.status_code == 200:
-            df = pd.read_csv(io.StringIO(resp.text))
-            rename = {}
-            cols_lower = {c.lower(): c for c in df.columns}
-            if "transaction_id" not in cols_lower and "id" in cols_lower:
-                rename[cols_lower["id"]] = "transaction_id"
-            if "is_fraud" not in cols_lower and "class" in cols_lower:
-                rename[cols_lower["class"]] = "is_fraud"
-            if rename:
-                df = df.rename(columns=rename)
-            if {"transaction_id", "amount", "is_fraud"}.issubset(df.columns):
-                return df.head(800)
-    except Exception:
-        pass
-    return _generate_synthetic_df(800)
+    """
+    Session-scoped DataFrame from dazzle-nu/CIS435-CreditCardFraudDetection (~1000 rows).
+    Falls back to synthetic if HuggingFace is unavailable.
+    """
+    df = _load_hf_df()
+    return df if df is not None else _generate_synthetic_df()
 
 
 # ---------------------------------------------------------------------------
@@ -141,12 +170,16 @@ def matrix_results() -> Generator[list[dict], None, None]:
         print("=" * 90)
 
     # --- Save JSON ---
+    # Pull buyer prompt from first eval row if present (set by test_live_e2e.py)
+    buyer_prompt = eval_rows[0].get("buyer_prompt") if eval_rows else None
+
     output = {
         "title":     "Confidential Data Procurement — Demo Results",
         "generated": str(datetime.date.today()),
         "model":     "deepseek-ai/DeepSeek-V3.1",
         "pipeline":  "deterministic → LLM agent (schema match + claim verify) → guardrails",
         "note":      "base_price=0: bad data → payment approaches $0. Reserve not met → deal rejected.",
+        "buyer_prompt": buyer_prompt,
         "evaluation_matrix": [
             {
                 "id":             i + 1,
@@ -154,6 +187,7 @@ def matrix_results() -> Generator[list[dict], None, None]:
                 "narrative":      r.get("narrative", ""),
                 "seller_variant": r.get("seller", ""),
                 "buyer_variant":  r.get("buyer", ""),
+                "seller_input":   r.get("seller_input"),
                 "reserve_price":  r.get("reserve"),
                 "quality_score":  round(r["quality"], 4) if r.get("quality") is not None else None,
                 "proposed_payment": r.get("payment"),
