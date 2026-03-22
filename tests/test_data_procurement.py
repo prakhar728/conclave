@@ -492,3 +492,128 @@ class TestValidateToolOutput:
 
     def test_empty_string_passes(self):
         assert validate_tool_output("") == ""
+
+
+# ---------------------------------------------------------------------------
+# procurement_init_handler
+# ---------------------------------------------------------------------------
+
+from unittest.mock import patch
+
+from skills.confidential_data_procurement.init import (
+    _parse_llm_response,
+    procurement_init_handler,
+)
+
+
+class _FakeLLM:
+    """Minimal LLM stub — returns a fixed content string."""
+    def __init__(self, content: str):
+        self._content = content
+
+    def invoke(self, _messages):
+        class _R:
+            pass
+        r = _R()
+        r.content = self._content
+        return r
+
+
+_SEEDED_CONV = [
+    {"role": "system", "content": "sys"},
+    {"role": "ai",     "content": "greeting"},
+]
+
+_VALID_JSON = (
+    '{"ready": true, "required_columns": ["txn_id", "amount", "label"], '
+    '"min_rows": 500, "max_null_rate": 0.05, "max_duplicate_rate": 0.10, '
+    '"max_budget": 4000.0, "base_price": 200.0, '
+    '"min_label_rate": 0.02, "label_column": "label", '
+    '"forbidden_columns": ["ssn"], "description": "fraud dataset"}'
+)
+
+
+class TestParseLlmResponse:
+    def test_valid_ready_json(self):
+        result = _parse_llm_response(_VALID_JSON)
+        assert result is not None
+        assert result["ready"] is True
+        assert result["required_columns"] == ["txn_id", "amount", "label"]
+
+    def test_markdown_fences_stripped(self):
+        wrapped = f"```json\n{_VALID_JSON}\n```"
+        assert _parse_llm_response(wrapped) is not None
+
+    def test_non_json_returns_none(self):
+        assert _parse_llm_response("Sure, what columns do you need?") is None
+
+    def test_ready_false_returns_none(self):
+        assert _parse_llm_response('{"ready": false, "message": "tell me more"}') is None
+
+    def test_missing_ready_returns_none(self):
+        assert _parse_llm_response('{"required_columns": ["a"]}') is None
+
+
+class TestProcurementInitHandler:
+    def test_first_turn_returns_greeting(self):
+        result = procurement_init_handler("", [])
+        assert result["status"] == "configuring"
+        assert "required columns" in result["message"].lower()
+        assert result["conversation"][0]["role"] == "system"
+
+    def test_first_turn_no_llm_call(self):
+        # No patch needed — should not call get_llm at all on turn 1
+        result = procurement_init_handler("anything", [])
+        assert result["status"] == "configuring"
+
+    def test_valid_json_returns_ready(self):
+        with patch("skills.confidential_data_procurement.init.get_llm",
+                   return_value=_FakeLLM(_VALID_JSON)):
+            result = procurement_init_handler("here is my policy", _SEEDED_CONV)
+        assert result["status"] == "ready"
+        assert result["threshold"] == 1
+        policy = result["config"]
+        assert policy.min_rows == 500
+        assert policy.max_budget == 4000.0
+        assert policy.base_price == 200.0
+        assert "ssn" in policy.forbidden_columns
+
+    def test_empty_columns_stays_configuring(self):
+        bad = _VALID_JSON.replace('"txn_id", "amount", "label"', "")
+        bad = bad.replace('"required_columns": [],', '"required_columns": [],')
+        payload = '{"ready": true, "required_columns": [], "min_rows": 500, "max_null_rate": 0.05, "max_duplicate_rate": 0.10, "max_budget": 4000.0}'
+        with patch("skills.confidential_data_procurement.init.get_llm",
+                   return_value=_FakeLLM(payload)):
+            result = procurement_init_handler("no columns", _SEEDED_CONV)
+        assert result["status"] == "configuring"
+        assert "column" in result["message"].lower()
+
+    def test_zero_min_rows_stays_configuring(self):
+        payload = '{"ready": true, "required_columns": ["a"], "min_rows": 0, "max_null_rate": 0.05, "max_duplicate_rate": 0.10, "max_budget": 1000.0}'
+        with patch("skills.confidential_data_procurement.init.get_llm",
+                   return_value=_FakeLLM(payload)):
+            result = procurement_init_handler("zero rows", _SEEDED_CONV)
+        assert result["status"] == "configuring"
+        assert "rows" in result["message"].lower()
+
+    def test_base_price_above_budget_stays_configuring(self):
+        payload = '{"ready": true, "required_columns": ["a"], "min_rows": 100, "max_null_rate": 0.05, "max_duplicate_rate": 0.10, "max_budget": 500.0, "base_price": 600.0}'
+        with patch("skills.confidential_data_procurement.init.get_llm",
+                   return_value=_FakeLLM(payload)):
+            result = procurement_init_handler("bad price", _SEEDED_CONV)
+        assert result["status"] == "configuring"
+        assert "base price" in result["message"].lower()
+
+    def test_non_json_response_stays_configuring(self):
+        with patch("skills.confidential_data_procurement.init.get_llm",
+                   return_value=_FakeLLM("What forbidden columns do you need?")):
+            result = procurement_init_handler("not ready yet", _SEEDED_CONV)
+        assert result["status"] == "configuring"
+        assert result["message"] == "What forbidden columns do you need?"
+
+    def test_conversation_accumulates(self):
+        with patch("skills.confidential_data_procurement.init.get_llm",
+                   return_value=_FakeLLM(_VALID_JSON)):
+            result = procurement_init_handler("my policy", _SEEDED_CONV)
+        # seeded (2) + human (1) + ai (1) = 4
+        assert len(result["conversation"]) == 4
