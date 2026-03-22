@@ -49,6 +49,7 @@ export interface InitResponse {
   status: "configuring" | "ready"
   message: string
   admin_token?: string
+  user_token?: string
 }
 
 // /submit
@@ -92,4 +93,102 @@ export interface StoredInstance {
   skill_name: string
   admin_token: string
   created_at: string
+}
+
+// ---------------------------------------------------------------------------
+// Procurement types
+// ---------------------------------------------------------------------------
+
+export interface BuyerPolicy {
+  required_columns: string[]
+  min_row_count: number
+  max_null_rate: number
+  max_duplicate_rate: number
+  min_label_rate?: number
+  forbidden_columns: string[]
+  seller_claim_checks: string[]
+  milestone_weights: Record<string, number>
+  max_budget: number
+  allowed_pre_purchase_outputs: string[]
+  release_mode: "immediate" | "manual"
+  renegotiation_enabled: boolean
+}
+
+export interface SellerClaim {
+  name: string
+  value: string | number
+}
+
+export interface SupplierSubmission {
+  dataset_name: string
+  dataset_reference?: string
+  seller_claims: SellerClaim[]
+  metadata: Record<string, string>
+  reserve_price: number
+  note?: string
+}
+
+export interface HardConstraintResult {
+  name: string
+  passed: boolean
+  detail?: string
+}
+
+export interface MilestoneScore {
+  name: string
+  weight: number
+  score: number
+  passed: boolean
+}
+
+export interface DatasetMetrics {
+  row_count: number
+  null_rate: number
+  duplicate_rate: number
+  column_count: number
+  columns_present: string[]
+  columns_missing: string[]
+}
+
+export type NegotiationState =
+  | "none"
+  | "requested_by_buyer"
+  | "requested_by_seller"
+  | "awaiting_counterparty"
+  | "renegotiation_submitted"
+  | "accepted"
+  | "rejected"
+
+export interface NegotiationStatus {
+  state: NegotiationState
+  revised_budget?: number
+  revised_reserve?: number
+  used: boolean
+}
+
+export type SettlementState = "pending" | "authorized" | "failed" | "none"
+
+export interface SettlementStatus {
+  state: SettlementState
+  amount?: number
+}
+
+export interface ReleaseToken {
+  token: string
+  issued_at: string
+  expires_at?: string
+}
+
+export interface ProcurementResult {
+  submission_id: string
+  hard_constraints: HardConstraintResult[]
+  milestones: MilestoneScore[]
+  claim_results: Record<string, boolean>
+  partial_score: number
+  proposed_payment: number
+  negotiation: NegotiationStatus
+  settlement: SettlementStatus
+  release_token?: ReleaseToken
+  dataset_metrics: DatasetMetrics
+  enclave_signature?: string
 }

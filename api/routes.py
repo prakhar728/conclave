@@ -307,9 +307,16 @@ async def submit(submission: dict, request: Request):
     """
     token_info = _resolve_token(request)
     instance_id = token_info["instance_id"]
+    skill_name = _instances[instance_id]["skill_name"]
+    card = _skill_router.get_card(skill_name)
 
-    sid = submission.get("submission_id") or str(uuid.uuid4())
-    submission["submission_id"] = sid  # ensure stored dict always has the id
+    try:
+        validated = card.input_model(**submission)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Submission validation failed: {e}")
+
+    sid = validated.submission_id
+    submission = validated.model_dump()  # ensure stored dict is normalized
 
     _submissions[instance_id][sid] = submission
     token_info["submission_ids"].add(sid)
