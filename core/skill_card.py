@@ -35,6 +35,8 @@ class SkillCard:
     roles: dict = field(default_factory=dict)           # admin + user role declarations
     setup_prompt: str = ""                              # LLM onboarding text for admins (metadata/docs)
     init_handler: Optional[Callable] = None             # skill-owned onboarding conversation handler
+    upload_handler: Optional[Callable] = None           # skill-owned file upload handler (POST /upload)
+    respond_handler: Optional[Callable] = None          # skill-owned deal response handler (POST /respond)
     user_display: dict = field(default_factory=dict)    # display hints per output key for the frontend renderer
     version: str = "0.1.0"
 

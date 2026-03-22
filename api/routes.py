@@ -4,7 +4,8 @@ import secrets
 import uuid
 from functools import partial
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.datastructures import FormData
 
 from core.models import SkillResponse, InitRequest, InitResponse
 from skills.router import SkillRouter
@@ -349,6 +350,91 @@ def get_my_submissions(request: Request):
     """Return the submission IDs owned by the calling token."""
     token_info = _resolve_token(request)
     return {"submission_ids": list(token_info["submission_ids"])}
+
+
+@router.post("/upload")
+async def upload_file(request: Request):
+    """
+    Generic file upload — delegates entirely to the skill's upload_handler.
+    Skills that need file upload declare upload_handler on their SkillCard.
+    The skill owns all parsing, storage, and validation logic.
+
+    Returns whatever the skill's upload_handler returns (e.g. {"dataset_id": "..."}).
+    """
+    token_info = _resolve_token(request)
+    instance_id = token_info["instance_id"]
+    card = _skill_router.get_card(_instances[instance_id]["skill_name"])
+
+    if card.upload_handler is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Skill '{_instances[instance_id]['skill_name']}' does not support file upload",
+        )
+
+    try:
+        form: FormData = await request.form()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, card.upload_handler, form, instance_id)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+    return result
+
+
+@router.post("/respond")
+async def respond_to_result(body: dict, request: Request):
+    """
+    Deal response — delegates entirely to the skill's respond_handler.
+    Skills that support renegotiation declare respond_handler on their SkillCard.
+
+    Body: {
+        "submission_id": str,
+        "action": "accept" | "reject" | "renegotiate",
+        "revised_value": float | null   # only when action="renegotiate"
+    }
+    Returns: {"settlement_status": str, ...any extra fields the skill returns}
+    """
+    token_info = _resolve_token(request)
+    instance_id = token_info["instance_id"]
+    role = token_info["role"]
+    card = _skill_router.get_card(_instances[instance_id]["skill_name"])
+
+    if card.respond_handler is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Skill '{_instances[instance_id]['skill_name']}' does not support deal responses",
+        )
+
+    submission_id = body.get("submission_id")
+    if not submission_id:
+        raise HTTPException(status_code=422, detail="submission_id is required")
+
+    instance_results = _results.get(instance_id, {})
+    if submission_id not in instance_results:
+        raise HTTPException(status_code=404, detail="Result not found or not yet available")
+
+    action = body.get("action")
+    if action not in ("accept", "reject", "renegotiate"):
+        raise HTTPException(status_code=422, detail="action must be 'accept', 'reject', or 'renegotiate'")
+
+    try:
+        loop = asyncio.get_event_loop()
+        updated = await loop.run_in_executor(
+            None,
+            card.respond_handler,
+            instance_results[submission_id],
+            action,
+            body.get("revised_value"),
+            "buyer" if role == "admin" else "supplier",
+            _instances[instance_id]["config"],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    _results[instance_id][submission_id] = updated
+    return {"settlement_status": updated.get("settlement_status")}
 
 
 @router.post("/trigger")
