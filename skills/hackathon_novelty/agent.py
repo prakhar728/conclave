@@ -41,14 +41,17 @@ from langgraph.prebuilt import ToolNode
 
 from config import get_llm
 from skills.hackathon_novelty.tools import TRIAGE_TOOLS, ANALYSIS_TOOLS, ALL_TOOLS
-from skills.hackathon_novelty.config import SIMILARITY_DUPLICATE_THRESHOLD, LOW_NOVELTY_THRESHOLD
+from skills.hackathon_novelty.config import (
+    SIMILARITY_DUPLICATE_THRESHOLD, LOW_NOVELTY_THRESHOLD,
+    TRIAGE_MODEL, QUICK_MODEL, ANALYZE_MODEL,
+)
 
 
 # --- Prompt version constants ---
 # Bump when changing the corresponding prompt. Flows into LangSmith traces and eval logs.
 TRIAGE_PROMPT_VERSION = "v3"
 QUICK_PROMPT_VERSION = "v1"
-ANALYZE_PROMPT_VERSION = "v2"
+ANALYZE_PROMPT_VERSION = "v3"
 
 
 class AgentState(TypedDict):
@@ -128,12 +131,17 @@ For each submission:
 4. Call score_criterion for each criterion, then produce your 0-10 score
 5. You may call get_similar_submissions if you want comparative context
 
-When you have read and scored all submissions, output ONLY a raw JSON array with no markdown fences,
-no prose, no explanation — just the JSON:
-[{{"submission_id": "...", "criteria_scores": {{"criterion_name": score, ...}}}}, ...]
+SCORING RUBRIC — you MUST use this scale:
+1-3: Weak — vague idea, no evidence of feasibility, minimal impact potential
+4-6: Average — clear idea with some merit, partial evidence, moderate potential
+7-9: Strong — well-developed, evidence-backed, high potential
+10: Exceptional — best-in-class, outstanding on this criterion
 
-Scores must differ across submissions that have different content — do not assign the same scores
-to all submissions unless their content is genuinely identical.
+You MUST NOT default to 5. Every score requires a reason grounded in what you read.
+Scores MUST vary across submissions that have meaningfully different content.
+
+Output ONLY a raw JSON array — no markdown fences, no prose, no explanation:
+[{{"submission_id": "...", "criteria_scores": {{"criterion_name": score, ...}}}}, ...]
 """
 
 
@@ -141,7 +149,7 @@ to all submissions unless their content is genuinely identical.
 
 def triage_node(state: AgentState) -> dict:
     """LLM node: classify each submission using triage tools."""
-    llm = get_llm().bind_tools(TRIAGE_TOOLS)
+    llm = get_llm(TRIAGE_MODEL).bind_tools(TRIAGE_TOOLS)
 
     system_prompt = TRIAGE_SYSTEM_PROMPT.format(
         duplicate_threshold=SIMILARITY_DUPLICATE_THRESHOLD,
@@ -151,10 +159,11 @@ def triage_node(state: AgentState) -> dict:
     # Include precomputed triage context so the LLM has rich signals upfront
     context_lines = []
     for sid, ctx in state["triage_context"].items():
+        relevance_str = f", relevance={ctx['relevance_score']:.3f}" if ctx.get('relevance_score') is not None else ""
         context_lines.append(
             f"  {sid}: novelty={ctx['novelty_score']:.3f}, percentile={ctx['percentile']:.1f}, "
             f"cluster={ctx['cluster']} (size {ctx['cluster_size']}), "
-            f"has_repo={ctx['has_repo']}, has_deck={ctx['has_deck']}"
+            f"has_repo={ctx['has_repo']}, has_deck={ctx['has_deck']}{relevance_str}"
         )
     context_str = "\n".join(context_lines)
     human_msg = (
@@ -231,7 +240,7 @@ def quick_node(state: AgentState) -> dict:
     if not state["quick_ids"]:
         return {}
 
-    llm = get_llm().bind_tools(ANALYSIS_TOOLS)
+    llm = get_llm(QUICK_MODEL).bind_tools(ANALYSIS_TOOLS)
     criteria_str = "\n".join(f"- {k}: weight {v}" for k, v in state["criteria"].items())
     system_prompt = QUICK_SYSTEM_PROMPT.format(
         criteria=criteria_str, guidelines=state["guidelines"]
@@ -253,7 +262,14 @@ def quick_node(state: AgentState) -> dict:
         messages.extend(tool_results["messages"])
         iteration += 1
 
-    parsed = _parse_agent_results(response.content, state["quick_ids"], state["criteria"])
+    raw = response.content if isinstance(response.content, str) else str(response.content)
+    if not raw.strip() and iteration > 0:
+        messages.append(HumanMessage(content="Now output the final JSON scores array."))
+        response = llm.invoke(messages)
+        messages.append(response)
+        raw = response.content if isinstance(response.content, str) else str(response.content)
+
+    parsed = _parse_agent_results(raw, state["quick_ids"], state["criteria"])
     results = [{**r, "status": "quick_scored", "analysis_depth": "quick"} for r in parsed]
     return {"messages": messages, "results": results}
 
@@ -263,7 +279,7 @@ def analyze_node(state: AgentState) -> dict:
     if not state["analyze_ids"]:
         return {}
 
-    llm = get_llm().bind_tools(ALL_TOOLS)
+    llm = get_llm(ANALYZE_MODEL).bind_tools(ALL_TOOLS)
     criteria_str = "\n".join(f"- {k}: weight {v}" for k, v in state["criteria"].items())
     system_prompt = ANALYZE_SYSTEM_PROMPT.format(
         criteria=criteria_str, guidelines=state["guidelines"]
@@ -286,7 +302,16 @@ def analyze_node(state: AgentState) -> dict:
         messages.extend(tool_results["messages"])
         iteration += 1
 
-    parsed = _parse_agent_results(response.content, state["analyze_ids"], state["criteria"])
+    # If the model stopped without outputting scores (empty content after tool calls),
+    # nudge it to produce the JSON output.
+    raw = response.content if isinstance(response.content, str) else str(response.content)
+    if not raw.strip() and iteration > 0:
+        messages.append(HumanMessage(content="Now output the final JSON scores array."))
+        response = llm.invoke(messages)
+        messages.append(response)
+        raw = response.content if isinstance(response.content, str) else str(response.content)
+
+    parsed = _parse_agent_results(raw, state["analyze_ids"], state["criteria"])
     results = [{**r, "status": "analyzed", "analysis_depth": "full"} for r in parsed]
     return {"messages": messages, "results": results}
 
@@ -418,28 +443,43 @@ def _parse_agent_results(text: str, submission_ids: list[str], criteria: dict[st
     results = []
     parsed_ids = set()
 
-    try:
-        array_match = re.search(r'\[.*\]', text, re.DOTALL)
-        if array_match:
-            arr = json.loads(array_match.group())
-            for obj in arr:
-                if isinstance(obj, dict) and "submission_id" in obj and "criteria_scores" in obj:
-                    results.append(obj)
-                    parsed_ids.add(obj["submission_id"])
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    if not results:
-        json_pattern = r'\{[^{}]*"submission_id"[^{}]*\}'
-        matches = re.findall(json_pattern, text, re.DOTALL)
-        for match in matches:
-            try:
-                obj = json.loads(match)
-                if "submission_id" in obj and "criteria_scores" in obj:
-                    results.append(obj)
-                    parsed_ids.add(obj["submission_id"])
-            except json.JSONDecodeError:
+    # Find the first JSON array starting with an object — handles compact JSON,
+    # pretty-printed JSON, and models that emit reasoning text (with brackets)
+    # before the actual output.
+    m = re.search(r'\[\s*\{', text)
+    if m:
+        start = m.start()
+        depth = 0
+        in_str = False
+        escape = False
+        end = -1
+        for i in range(start, len(text)):
+            c = text[i]
+            if escape:
+                escape = False
                 continue
+            if c == '\\' and in_str:
+                escape = True
+                continue
+            if c == '"':
+                in_str = not in_str
+            if not in_str:
+                if c == '[':
+                    depth += 1
+                elif c == ']':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+        if end != -1:
+            try:
+                arr = json.loads(text[start:end])
+                for obj in arr:
+                    if isinstance(obj, dict) and "submission_id" in obj and "criteria_scores" in obj:
+                        results.append(obj)
+                        parsed_ids.add(obj["submission_id"])
+            except (json.JSONDecodeError, TypeError):
+                pass
 
     for sid in submission_ids:
         if sid not in parsed_ids:

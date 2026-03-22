@@ -28,8 +28,8 @@ class NoveltyResult(BaseModel):
     """Final output for one submission after guardrails. This is what leaves the skill."""
     submission_id: str
     novelty_score: float = Field(ge=0.0, le=1.0)
-    percentile: float = Field(ge=0.0, le=100.0)
-    cluster: str
+    relevance_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    aligned: Optional[bool] = None
     criteria_scores: dict[str, float] = {}
     # Analysis metadata — set by the agent based on which branch processed this submission
     status: str = "analyzed"          # "analyzed" | "duplicate" | "quick_scored"

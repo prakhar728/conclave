@@ -18,13 +18,8 @@ def _get_model() -> SentenceTransformer:
 
 
 def fuse_text(submission: HackathonSubmission) -> str:
-    """Concatenate all text fields into a single string for embedding."""
-    parts = [submission.idea_text]
-    if submission.repo_summary:
-        parts.append(submission.repo_summary)
-    if submission.deck_text:
-        parts.append(submission.deck_text)
-    return " ".join(parts)
+    """Idea text only — similarity/novelty based on core idea, not supporting materials."""
+    return submission.idea_text
 
 
 def compute_embeddings(texts: list[str]) -> np.ndarray:
@@ -55,6 +50,28 @@ def compute_percentiles(novelty_scores: np.ndarray) -> np.ndarray:
     return percentiles
 
 
+def compute_relevance_scores(
+    embeddings: np.ndarray,
+    guidelines: str = "",
+    criteria: dict[str, float] | None = None,
+) -> np.ndarray | None:
+    """Cosine similarity between each submission and the hackathon theme.
+    Returns None if no reference text can be constructed (no guidelines or criteria).
+    """
+    parts = []
+    if criteria:
+        parts.append(f"Hackathon evaluation focus: {', '.join(criteria.keys())}")
+    if guidelines and guidelines.strip():
+        parts.append(guidelines.strip())
+    reference = ". ".join(parts)
+    if not reference.strip():
+        return None
+    model = _get_model()
+    ref_emb = model.encode([reference], show_progress_bar=False)
+    sims = cosine_similarity(embeddings, ref_emb).flatten()
+    return np.clip(sims, 0.0, 1.0)
+
+
 def cluster_submissions(embeddings: np.ndarray) -> list[str]:
     """KMeans clustering. Auto-select k. Return generic labels."""
     n = embeddings.shape[0]
@@ -67,14 +84,19 @@ def cluster_submissions(embeddings: np.ndarray) -> list[str]:
     return [label_names[l] for l in labels]
 
 
-def run_deterministic(submissions: list[HackathonSubmission]) -> dict:
+def run_deterministic(
+    submissions: list[HackathonSubmission],
+    guidelines: str = "",
+    criteria: dict[str, float] | None = None,
+) -> dict:
     """
     Full deterministic pipeline. Returns dict with:
     - embeddings: np.ndarray (N, D)
     - sim_matrix: np.ndarray (N, N)
     - novelty_scores: np.ndarray (N,)
-    - percentiles: np.ndarray (N,)
-    - clusters: list[str] (N,)
+    - percentiles: np.ndarray (N,)       — internal, used by triage_context
+    - clusters: list[str] (N,)           — internal, used by triage_context
+    - relevance_scores: np.ndarray (N,) or None
     - submission_ids: list[str] (N,)
     """
     texts = [fuse_text(s) for s in submissions]
@@ -83,6 +105,7 @@ def run_deterministic(submissions: list[HackathonSubmission]) -> dict:
     novelty_scores = compute_novelty_scores(sim_matrix)
     percentiles = compute_percentiles(novelty_scores)
     clusters = cluster_submissions(embeddings)
+    relevance_scores = compute_relevance_scores(embeddings, guidelines, criteria)
 
     return {
         "embeddings": embeddings,
@@ -90,5 +113,6 @@ def run_deterministic(submissions: list[HackathonSubmission]) -> dict:
         "novelty_scores": novelty_scores,
         "percentiles": percentiles,
         "clusters": clusters,
+        "relevance_scores": relevance_scores,
         "submission_ids": [s.submission_id for s in submissions],
     }

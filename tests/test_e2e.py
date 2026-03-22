@@ -33,8 +33,8 @@ def _fake_run_skill(inputs, params):
             {
                 "submission_id": s.submission_id,
                 "novelty_score": 0.7,
-                "percentile": 60.0,
-                "cluster": "A",
+                "relevance_score": 0.75,
+                "aligned": True,
                 "criteria_scores": {"originality": 7.0, "feasibility": 6.0},
                 "status": "analyzed",
                 "analysis_depth": "full",
@@ -113,7 +113,6 @@ def test_operator_init_loop(client):
         body = r.json()
         assert body["status"] == "configuring"
         assert body["admin_token"] is None
-        assert body["user_token"] is None
         instance_id = body["instance_id"]
 
         # Turn 2: operator provides criteria → ready
@@ -181,7 +180,11 @@ def test_full_e2e_workflow(client):
         body = r.json()
         assert body["submission_id"] == "sub_001"
         assert "novelty_score" in body
-        assert "criteria_scores" in body
+        assert "aligned" in body
+        # Users should NOT see internal fields
+        assert "criteria_scores" not in body
+        assert "status" not in body
+        assert "relevance_score" not in body
 
         # Step 6: Operator views all results
         r = client.get("/results", headers={"X-Instance-Token": admin_token})
@@ -323,8 +326,13 @@ def test_init_rejects_empty_criteria():
                 content = '{"ready": true, "criteria": {}, "guidelines": "", "threshold": 5}'
             return _Resp()
 
+    # Pass non-empty conversation so it skips the greeting template and hits the LLM
+    seeded_conversation = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "ai", "content": "greeting"},
+    ]
     with patch("skills.hackathon_novelty.init.get_llm", return_value=_FakeLLM()):
-        result = hackathon_init_handler("use empty criteria", [])
+        result = hackathon_init_handler("use empty criteria", seeded_conversation)
     assert result["status"] == "configuring"
     assert "empty" in result["message"].lower() or "criterion" in result["message"].lower()
 
@@ -340,8 +348,12 @@ def test_init_rejects_bad_weight_sum():
                 content = '{"ready": true, "criteria": {"a": 0.3, "b": 0.3}, "guidelines": "", "threshold": 5}'
             return _Resp()
 
+    seeded_conversation = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "ai", "content": "greeting"},
+    ]
     with patch("skills.hackathon_novelty.init.get_llm", return_value=_FakeLLM()):
-        result = hackathon_init_handler("bad weights", [])
+        result = hackathon_init_handler("bad weights", seeded_conversation)
     assert result["status"] == "configuring"
     assert "1.0" in result["message"] or "sum" in result["message"].lower()
 
@@ -357,8 +369,12 @@ def test_init_rejects_non_numeric_threshold():
                 content = '{"ready": true, "criteria": {"a": 0.5, "b": 0.5}, "guidelines": "", "threshold": "five"}'
             return _Resp()
 
+    seeded_conversation = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "ai", "content": "greeting"},
+    ]
     with patch("skills.hackathon_novelty.init.get_llm", return_value=_FakeLLM()):
-        result = hackathon_init_handler("bad threshold", [])
+        result = hackathon_init_handler("bad threshold", seeded_conversation)
     assert result["status"] == "configuring"
     assert "threshold" in result["message"].lower()
 
@@ -394,6 +410,7 @@ def test_missing_agent_result_produces_error_status():
         "novelty_scores": np.array([0.5, 0.6, 0.7, 0.8, 0.9]),
         "percentiles": np.array([20.0, 40.0, 60.0, 80.0, 100.0]),
         "clusters": ["A", "A", "B", "B", "C"],
+        "relevance_scores": np.array([0.5, 0.6, 0.7, 0.8, 0.9]),
         "submission_ids": [f"sub_{i:03d}" for i in range(1, 6)],
     }
 

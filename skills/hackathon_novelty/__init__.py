@@ -22,7 +22,7 @@ from skills.hackathon_novelty.deterministic import run_deterministic
 from skills.hackathon_novelty.tools import set_context
 from skills.hackathon_novelty.agent import run_agent
 from skills.hackathon_novelty.guardrails import HackathonNoveltyFilter
-from skills.hackathon_novelty.config import ALLOWED_OUTPUT_KEYS, MIN_SUBMISSIONS
+from skills.hackathon_novelty.config import ALLOWED_OUTPUT_KEYS, USER_OUTPUT_KEYS, MIN_SUBMISSIONS, RELEVANCE_THRESHOLD
 from skills.hackathon_novelty.init import hackathon_init_handler
 
 
@@ -36,7 +36,7 @@ def run_skill(inputs: list[HackathonSubmission], params: OperatorConfig) -> Skil
         )
 
     # Layer 1: Deterministic
-    det = run_deterministic(inputs)
+    det = run_deterministic(inputs, guidelines=params.guidelines, criteria=params.criteria)
 
     # Build submissions map and set tool context
     submissions_map = {s.submission_id: s for s in inputs}
@@ -55,6 +55,7 @@ def run_skill(inputs: list[HackathonSubmission], params: OperatorConfig) -> Skil
             "cluster_size": clusters.count(clusters[i]),
             "has_repo": sub.repo_summary is not None,
             "has_deck": sub.deck_text is not None,
+            "relevance_score": float(det["relevance_scores"][i]) if det["relevance_scores"] is not None else None,
         }
 
     # Layer 2: Agent (multi-node graph)
@@ -70,11 +71,12 @@ def run_skill(inputs: list[HackathonSubmission], params: OperatorConfig) -> Skil
     results = []
     for i, sid in enumerate(det["submission_ids"]):
         ar = agent_map.get(sid, {})
+        rel = float(det["relevance_scores"][i]) if det["relevance_scores"] is not None else None
         result = NoveltyResult(
             submission_id=sid,
             novelty_score=float(det["novelty_scores"][i]),
-            percentile=float(det["percentiles"][i]),
-            cluster=det["clusters"][i],
+            relevance_score=rel,
+            aligned=(rel >= RELEVANCE_THRESHOLD) if rel is not None else None,
             criteria_scores=ar.get("criteria_scores", {}),
             status=ar.get("status", "analyzed") if ar else "error",
             analysis_depth=ar.get("analysis_depth", "full"),
@@ -101,6 +103,7 @@ skill_card = SkillCard(
     run=run_skill,
     input_model=HackathonSubmission,
     output_keys=ALLOWED_OUTPUT_KEYS,
+    user_output_keys=USER_OUTPUT_KEYS,
     config={"min_submissions": MIN_SUBMISSIONS},
     trigger_modes=[
         {
@@ -153,8 +156,9 @@ skill_card = SkillCard(
         "- idea_text (required): A description of their hackathon idea.\n"
         "- repo_summary (optional): Technical details or a summary of their implementation.\n"
         "- deck_text (optional): Pitch deck or business case content.\n\n"
-        "Each user receives: novelty_score (0-1), percentile rank, cluster assignment, "
-        "per-criteria scores (0-10), and analysis status. They never see other teams' data."
+        "Each user receives: novelty_score (0-1, how unique your idea is compared to others) "
+        "and an alignment flag (whether your idea fits the hackathon theme). "
+        "They never see other teams' submissions or scores."
     ),
     init_handler=hackathon_init_handler,
     user_display={

@@ -1,14 +1,8 @@
 """
-Operator onboarding handler for hackathon_novelty.
+Operator onboarding handler.
 
-The API calls init_handler(message, conversation) on each /init request.
-This module owns all hackathon-specific onboarding logic:
-- System prompt construction (criteria weights, guidelines, threshold)
-- LLM conversation management
-- JSON extraction and OperatorConfig construction
-
-To adapt for a different skill: implement a new handler with the same
-interface. The API doesn't care what happens inside.
+The API calls init_handler(message, conversation) on each POST /init request.
+This module manages the conversational setup with the admin/operator.
 
 Handler interface:
     init_handler(message: str, conversation: list[dict]) -> dict
@@ -16,6 +10,11 @@ Handler interface:
         {"status": "configuring", "message": str, "conversation": list[dict]}
         {"status": "ready", "message": str, "conversation": list[dict],
          "config": OperatorConfig, "threshold": int}
+
+TODO:
+- Customize _SYSTEM_PROMPT for your skill's configuration needs
+- Update validation logic for your required fields
+- If your skill doesn't need admin setup, set init_handler=None in the SkillCard
 """
 from __future__ import annotations
 import json
@@ -25,33 +24,23 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from config import get_llm
 from core.models import OperatorConfig
-from skills.hackathon_novelty.config import MIN_SUBMISSIONS, INIT_MODEL
+from skills.template.config import MIN_SUBMISSIONS, INIT_MODEL
 
 
-# Bump when changing _SYSTEM_PROMPT or _GREETING_TEMPLATE.
-INIT_PROMPT_VERSION = "v3"
+INIT_PROMPT_VERSION = "v1"
 
 
-_GREETING_TEMPLATE = (
-    "Welcome to hackathon evaluation setup.\n\n"
-    "Please provide the following:\n\n"
-    "1. **Evaluation criteria** with weights summing to 1.0\n"
-    '   Example: {"originality": 0.4, "feasibility": 0.3, "impact": 0.3}\n\n'
-    "2. **(Optional) Guidelines** — judging instructions\n"
-    '   Example: "Focus on AI/ML innovations"\n\n'
-    f"3. **(Optional) Threshold** — minimum submissions before auto-evaluation (default: {MIN_SUBMISSIONS})\n\n"
-    "You can provide everything in one message."
-)
-
-
+# TODO: Customize this prompt for your skill's configuration needs.
+# The LLM collects config from the admin and outputs JSON when ready.
+# Key pattern: be explicit about what JSON to output when done.
 _SYSTEM_PROMPT = (
-    "You are setting up a hackathon novelty evaluation instance. "
+    "You are setting up an evaluation instance for a new skill. "
     "Your job is to collect the required configuration from the admin.\n\n"
     "REQUIRED:\n"
     "- criteria: a dict of criterion names to weights that sum to exactly 1.0\n"
-    "  Example: {\"originality\": 0.4, \"feasibility\": 0.3, \"impact\": 0.3}\n\n"
+    '  Example: {"quality": 0.5, "relevance": 0.3, "clarity": 0.2}\n\n'
     "OPTIONAL:\n"
-    "- guidelines: free-text judging instructions (e.g. 'Focus on AI/ML projects')\n"
+    "- guidelines: free-text instructions for the evaluation agent\n"
     f"- threshold: minimum submissions before auto-evaluation runs (default: {MIN_SUBMISSIONS})\n\n"
     "IMPORTANT: As soon as you have the required criteria (with weights summing to 1.0), "
     "respond with ONLY the JSON below — no confirmation, no commentary, no extra text:\n"
@@ -76,29 +65,13 @@ def _parse_llm_response(text: str) -> Optional[dict]:
     return None
 
 
-def hackathon_init_handler(message: str, conversation: list[dict]) -> dict:
-    """
-    Handle one turn of the admin onboarding conversation.
-
-    Called by the API on each POST /init. The API passes the accumulated
-    conversation; this handler appends the new messages and returns the result.
-    """
-    # First turn: return fixed greeting immediately (no LLM call).
-    # Seed the conversation so DeepSeek sees the greeting as its own message on turn 2+.
+def template_init_handler(message: str, conversation: list[dict]) -> dict:
+    """Handle one turn of the admin onboarding conversation."""
     if not conversation:
-        conversation = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "ai", "content": _GREETING_TEMPLATE},
-        ]
-        return {
-            "status": "configuring",
-            "message": _GREETING_TEMPLATE,
-            "conversation": conversation,
-        }
+        conversation = [{"role": "system", "content": _SYSTEM_PROMPT}]
 
     conversation = conversation + [{"role": "human", "content": message}]
 
-    # Build LangChain messages
     lc_messages = []
     for msg in conversation:
         if msg["role"] == "system":
@@ -141,20 +114,14 @@ def hackathon_init_handler(message: str, conversation: list[dict]) -> dict:
         except (ValueError, TypeError):
             return {
                 "status": "configuring",
-                "message": "Threshold must be a positive integer. Please provide a valid number.",
+                "message": "Threshold must be a positive integer.",
                 "conversation": conversation,
             }
 
         config = OperatorConfig(criteria=criteria, guidelines=guidelines)
-        ready_message = (
-            f"Configuration saved.\n"
-            f"Criteria: {json.dumps(criteria)}\n"
-            f"Guidelines: {guidelines or '(none)'}\n"
-            f"Threshold: {threshold} submissions"
-        )
         return {
             "status": "ready",
-            "message": ready_message,
+            "message": ai_text,
             "conversation": conversation,
             "config": config,
             "threshold": threshold,
