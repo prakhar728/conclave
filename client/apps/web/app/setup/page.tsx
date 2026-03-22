@@ -5,9 +5,10 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { ArrowLeft, ArrowRight, PaperPlaneTilt, Copy, Check } from "@phosphor-icons/react"
 import { TemplateCard, TEMPLATE_CATALOG } from "@/components/template-card"
 import { ChatMessage } from "@/components/chat-message"
+import { ProcurementPolicyPreview } from "@/components/procurement-policy-preview"
 import { api } from "@/lib/api"
 import { cn } from "@workspace/ui/lib/utils"
-import type { InitResponse } from "@/lib/types"
+import type { BuyerPolicy, InitResponse } from "@/lib/types"
 import Link from "next/link"
 import { Suspense } from "react"
 
@@ -41,6 +42,9 @@ function SetupContent() {
     criteria: [],
     hasGuidelines: false,
   })
+  const [procurementPolicy, setProcurementPolicy] = React.useState<Partial<BuyerPolicy>>({})
+
+  const isProcurement = selectedSkill === "confidential_procurement"
 
   // Step 3 state
   const [result, setResult] = React.useState<InitResponse | null>(null)
@@ -85,6 +89,8 @@ function SetupContent() {
     if (res.status === "ready") {
       setMessages((m) => [...m, { role: "assistant", content: res.message }])
       setResult(res)
+      if (isProcurement) updateProcurementPreview(userMsg)
+      else updateConfigPreview(userMsg)
       // Save to localStorage
       localStorage.setItem(
         `ndai_instance_${res.instance_id}`,
@@ -98,7 +104,8 @@ function SetupContent() {
       setTimeout(() => setStep(3), 1000)
     } else {
       setMessages((m) => [...m, { role: "assistant", content: res.message }])
-      updateConfigPreview(userMsg)
+      if (isProcurement) updateProcurementPreview(userMsg)
+      else updateConfigPreview(userMsg)
     }
   }
 
@@ -128,6 +135,46 @@ function SetupContent() {
     const thresholdMatch = lower.match(/(\d+)\s+submission/)
     if (thresholdMatch) {
       setConfigPreview((p) => ({ ...p, threshold: parseInt(thresholdMatch[1]!) }))
+    }
+  }
+
+  function updateProcurementPreview(msg: string) {
+    const budgetMatch = msg.match(/\$?([\d,]+)\s*(budget|max(?:imum)?)/i)
+    if (budgetMatch) {
+      const budget = parseInt((budgetMatch[1] ?? "").replace(/,/g, ""))
+      if (!isNaN(budget)) setProcurementPolicy((p) => ({ ...p, max_budget: budget }))
+    }
+    const rowMatch = msg.match(/([\d,]+)\s*(rows?|records?)/i)
+    if (rowMatch) {
+      const rows = parseInt((rowMatch[1] ?? "").replace(/,/g, ""))
+      if (!isNaN(rows)) setProcurementPolicy((p) => ({ ...p, min_row_count: rows }))
+    }
+    const nullMatch = msg.match(/(\d+)%\s*null|null.*?(\d+)%/i)
+    if (nullMatch) {
+      const rate = parseInt(nullMatch[1] ?? nullMatch[2]!) / 100
+      setProcurementPolicy((p) => ({ ...p, max_null_rate: rate }))
+    }
+    if (/renegotiat/i.test(msg)) {
+      setProcurementPolicy((p) => ({ ...p, renegotiation_enabled: true }))
+    }
+    if (/immediate|instant/i.test(msg)) {
+      setProcurementPolicy((p) => ({ ...p, release_mode: "immediate" }))
+    } else if (/manual/i.test(msg)) {
+      setProcurementPolicy((p) => ({ ...p, release_mode: "manual" }))
+    }
+    // Extract milestone-like keywords
+    const milestoneWords: Array<[string, RegExp]> = [
+      ["completeness", /complet/i],
+      ["schema", /schema/i],
+      ["distribution", /distribut/i],
+      ["claims", /claim/i],
+    ]
+    const found = milestoneWords.filter(([, re]) => re.test(msg))
+    if (found.length > 0) {
+      const weight = parseFloat((1 / found.length).toFixed(2))
+      const weights: Record<string, number> = {}
+      found.forEach(([name]) => { weights[name] = weight })
+      setProcurementPolicy((p) => ({ ...p, milestone_weights: { ...p.milestone_weights, ...weights } }))
     }
   }
 
@@ -238,7 +285,7 @@ function SetupContent() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
-                placeholder="Describe your hackathon, criteria, guidelines…"
+                placeholder={isProcurement ? "Describe your procurement policy — budget, required columns, milestones…" : "Describe your hackathon, criteria, guidelines…"}
                 className="flex-1 rounded-xl border border-[#d2d2d7] bg-white px-4 py-2.5 text-sm text-[#1d1d1f] placeholder:text-[#aeaeb2] focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
                 disabled={isTyping}
               />
@@ -256,10 +303,12 @@ function SetupContent() {
           <div className="hidden lg:block w-72 shrink-0">
             <div className="rounded-2xl border border-[#d2d2d7] bg-[#f5f5f7] p-5 sticky top-6">
               <p className="text-xs font-semibold text-[#6e6e73] uppercase tracking-widest mb-5">
-                Config Preview
+                {isProcurement ? "Policy Preview" : "Config Preview"}
               </p>
 
-              {configPreview.criteria.length === 0 ? (
+              {isProcurement ? (
+                <ProcurementPolicyPreview policy={procurementPolicy} />
+              ) : configPreview.criteria.length === 0 ? (
                 <p className="text-sm text-[#aeaeb2]">
                   Criteria will appear here as we chat…
                 </p>

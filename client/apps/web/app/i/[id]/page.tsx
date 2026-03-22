@@ -9,17 +9,42 @@ import {
   FilePdf,
   ArrowRight,
   CircleNotch,
+  ShieldCheck,
 } from "@phosphor-icons/react"
 import { AttestationWidget } from "@/components/attestation-widget"
 import { EnclaveSigBadge } from "@/components/enclave-sig-badge"
 import { ResultDetail } from "@/components/result-renderer"
+import { DatasetUploadCard } from "@/components/dataset-upload-card"
+import { ProcurementScorecard } from "@/components/procurement-scorecard"
+import { HardConstraintsCard } from "@/components/hard-constraints-card"
+import { MilestoneBreakdown } from "@/components/milestone-breakdown"
+import { NegotiationPanel } from "@/components/negotiation-panel"
+import { ReleaseTokenCard } from "@/components/release-token-card"
 import { api, ApiError } from "@/lib/api"
-import type { DisplayMap, NoveltyResult, SubmitResponse } from "@/lib/types"
+import type {
+  DisplayMap,
+  NoveltyResult,
+  ProcurementResult,
+  NegotiationStatus,
+  SellerClaim,
+  SubmitResponse,
+} from "@/lib/types"
 import { cn } from "@workspace/ui/lib/utils"
 import { Suspense } from "react"
 
-
-type PageState = "login" | "attest" | "form" | "pending" | "results"
+type PageState =
+  | "login"
+  | "attest"
+  | "form"
+  | "pending"
+  | "results"
+  // Procurement-specific
+  | "uploading"
+  | "pending_evaluation"
+  | "evaluation_complete"
+  | "awaiting_negotiation"
+  | "released"
+  | "rejected"
 
 const TOKEN_CACHE_KEY = (instanceId: string) => `conclave_user_token_${instanceId}`
 
@@ -27,6 +52,7 @@ function ParticipantContent({ id }: { id: string }) {
   const [pageState, setPageState] = React.useState<PageState>("login")
   const [userToken, setUserToken] = React.useState("")
   const [instanceMissing, setInstanceMissing] = React.useState(false)
+  const [isProcurement, setIsProcurement] = React.useState(false)
   const [toast, setToast] = React.useState<string | null>(null)
 
   function showToast(msg: string) {
@@ -50,9 +76,7 @@ function ParticipantContent({ id }: { id: string }) {
   const [authLoading, setAuthLoading] = React.useState(false)
   const [authError, setAuthError] = React.useState("")
 
-  // After we have a user_token, check if they've already submitted.
-  // If yes, restore their submission_id and route to pending/results.
-  async function checkPriorSubmission(token: string) {
+  async function checkPriorSubmission(token: string, procurementMode: boolean) {
     try {
       const { submission_ids } = await api.getMySubmissions(token)
       if (submission_ids.length === 0) {
@@ -61,19 +85,29 @@ function ParticipantContent({ id }: { id: string }) {
       }
       const sid = submission_ids[0]!
       setSubmissionId(sid)
-      try {
-        const r = await api.getOwnResult(token, sid)
-        setResult(r)
-        setPageState("results")
-      } catch {
-        const inst = await api.checkInstance(id)
-        setSubmitResponse({
-          submission_id: sid,
-          status: "received_pending",
-          submissions_count: inst.submissions,
-          threshold: inst.threshold,
-        })
-        setPageState("pending")
+      if (procurementMode) {
+        try {
+          const r = await api.getProcurementResult(token, sid)
+          setProcResult(r)
+          setPageState("evaluation_complete")
+        } catch {
+          setPageState("pending_evaluation")
+        }
+      } else {
+        try {
+          const r = await api.getOwnResult(token, sid)
+          setResult(r)
+          setPageState("results")
+        } catch {
+          const inst = await api.checkInstance(id)
+          setSubmitResponse({
+            submission_id: sid,
+            status: "received_pending",
+            submissions_count: inst.submissions,
+            threshold: inst.threshold,
+          })
+          setPageState("pending")
+        }
       }
     } catch (err) {
       handleAuthError(err)
@@ -83,10 +117,11 @@ function ParticipantContent({ id }: { id: string }) {
     }
   }
 
-  // On mount: verify the instance exists first, fetch skill display hints, then restore session.
   React.useEffect(() => {
     api.checkInstance(id).then((inst) => {
-      if (inst.skill_name) {
+      const proc = inst.skill_name === "confidential_procurement"
+      setIsProcurement(proc)
+      if (!proc && inst.skill_name) {
         api.getSkill(inst.skill_name).then((card) => {
           if (card.user_display) setSkillDisplay(card.user_display)
         }).catch(() => {})
@@ -96,10 +131,13 @@ function ParticipantContent({ id }: { id: string }) {
     const cached = localStorage.getItem(TOKEN_CACHE_KEY(id))
     if (cached) {
       setUserToken(cached)
-      checkPriorSubmission(cached)
+      // Detect procurement before checking prior submissions
+      api.checkInstance(id).then((inst) => {
+        const proc = inst.skill_name === "confidential_procurement"
+        checkPriorSubmission(cached, proc)
+      }).catch(() => {})
       return
     }
-    // Check if returning from GitHub/Google OAuth redirect
     import("@/lib/supabase").then(({ supabase }) => {
       supabase.auth.getSession().then(async ({ data }) => {
         const access_token = data.session?.access_token
@@ -108,7 +146,9 @@ function ParticipantContent({ id }: { id: string }) {
         try {
           const { user_token } = await api.verifyToken(access_token, id)
           saveToken(user_token)
-          await checkPriorSubmission(user_token)
+          const inst = await api.checkInstance(id)
+          const proc = inst.skill_name === "confidential_procurement"
+          await checkPriorSubmission(user_token, proc)
         } catch (err) {
           handleAuthError(err)
         }
@@ -148,8 +188,10 @@ function ParticipantContent({ id }: { id: string }) {
     }
     setAuthLoading(false)
   }
+
   const [skillDisplay, setSkillDisplay] = React.useState<DisplayMap>({})
 
+  // Hackathon form state
   const [ideaText, setIdeaText] = React.useState("")
   const [repoUrl, setRepoUrl] = React.useState("")
   const [repoSummary, setRepoSummary] = React.useState<string | null>(null)
@@ -160,6 +202,31 @@ function ParticipantContent({ id }: { id: string }) {
   const [result, setResult] = React.useState<NoveltyResult | null>(null)
   const [submissionId, setSubmissionId] = React.useState("")
 
+  // Procurement seller state
+  const [datasetName, setDatasetName] = React.useState("")
+  const [datasetReference, setDatasetReference] = React.useState("")
+  const [reservePrice, setReservePrice] = React.useState("")
+  const [sellerClaims, setSellerClaims] = React.useState<SellerClaim[]>([])
+  const [sellerNote, setSellerNote] = React.useState("")
+  const [procResult, setProcResult] = React.useState<ProcurementResult | null>(null)
+
+  // Procurement polling
+  React.useEffect(() => {
+    if (pageState !== "pending_evaluation" || !userToken || !submissionId) return
+    const interval = setInterval(async () => {
+      try {
+        const r = await api.getProcurementResult(userToken, submissionId)
+        setProcResult(r)
+        setPageState("evaluation_complete")
+        clearInterval(interval)
+      } catch {
+        // Not ready yet
+      }
+    }, 8000)
+    return () => clearInterval(interval)
+  }, [pageState, userToken, submissionId])
+
+  // Hackathon polling
   React.useEffect(() => {
     if (pageState !== "pending" || !submitResponse || !userToken) return
     const interval = setInterval(async () => {
@@ -182,12 +249,12 @@ function ParticipantContent({ id }: { id: string }) {
       const r = await api.fetchRepo(userToken, repoUrl)
       setRepoSummary(r.repo_summary)
     } catch {
-      // Failed silently
+      // ignore
     }
     setRepoLoading(false)
   }
 
-  async function handleSubmit() {
+  async function handleHackathonSubmit() {
     if (!ideaText.trim() || !userToken) return
     setSubmitting(true)
     const res = await api.submit(userToken, {
@@ -201,7 +268,44 @@ function ParticipantContent({ id }: { id: string }) {
     setPageState("pending")
   }
 
-  const canSubmit = ideaText.trim().length > 20 && !submitting
+  async function handleDatasetSubmit() {
+    if (!datasetName.trim() || !reservePrice || !userToken) return
+    setPageState("uploading")
+    const res = await api.submitDataset(userToken, {
+      dataset_name: datasetName,
+      dataset_reference: datasetReference || undefined,
+      seller_claims: sellerClaims,
+      metadata: {},
+      reserve_price: parseFloat(reservePrice.replace(/,/g, "")),
+      note: sellerNote || undefined,
+    })
+    setSubmissionId(res.submission_id)
+    setPageState("pending_evaluation")
+  }
+
+  async function handleAccept() {
+    if (!procResult || !userToken) return
+    await api.acceptDeal(userToken, procResult.submission_id)
+    const token = await api.getReleaseToken(userToken, procResult.submission_id)
+    setProcResult((r) => r ? { ...r, release_token: token, negotiation: { ...r.negotiation, state: "accepted" }, settlement: { state: "authorized", amount: r.proposed_payment } } : r)
+    setPageState("released")
+  }
+
+  async function handleReject() {
+    if (!procResult || !userToken) return
+    await api.rejectDeal(userToken, procResult.submission_id)
+    setProcResult((r) => r ? { ...r, negotiation: { ...r.negotiation, state: "rejected" }, settlement: { state: "failed" } } : r)
+    setPageState("rejected")
+  }
+
+  async function handleRenegotiate(revisedValue: number) {
+    if (!procResult || !userToken) return
+    await api.submitRenegotiation(userToken, procResult.submission_id, revisedValue)
+    setProcResult((r) =>
+      r ? { ...r, negotiation: { state: "renegotiation_submitted", revised_reserve: revisedValue, used: true } } : r,
+    )
+    setPageState("awaiting_negotiation")
+  }
 
   async function handleLogout() {
     const { supabase } = await import("@/lib/supabase")
@@ -213,6 +317,10 @@ function ParticipantContent({ id }: { id: string }) {
     setOtpCode("")
     setEmail("")
   }
+
+  const canHackathonSubmit = ideaText.trim().length > 20 && !submitting
+  const canDatasetSubmit =
+    datasetName.trim().length > 0 && reservePrice.trim().length > 0 && pageState === "form"
 
   if (instanceMissing) {
     return (
@@ -230,9 +338,21 @@ function ParticipantContent({ id }: { id: string }) {
     )
   }
 
+  const procurementSteps = [
+    "Login", "Verify", "Submit", "Evaluating", "Result",
+  ] as const
+  const procurementStateOrder: PageState[] = [
+    "login", "attest", "form", "pending_evaluation", "evaluation_complete",
+  ]
+
+  const hackathonSteps = ["Login", "Verify", "Submit", "Wait", "Results"] as const
+  const hackathonStateOrder: PageState[] = ["login", "attest", "form", "pending", "results"]
+
+  const steps = isProcurement ? procurementSteps : hackathonSteps
+  const stateOrder = isProcurement ? procurementStateOrder : hackathonStateOrder
+
   return (
     <div className="min-h-screen bg-white">
-      {/* Toast notification */}
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 rounded-2xl border border-[#d2d2d7] bg-white px-5 py-3 shadow-lg text-sm text-[#1d1d1f] max-w-sm w-[calc(100%-3rem)]">
           <span className="size-2 rounded-full bg-[#ff9f0a] shrink-0" />
@@ -240,7 +360,6 @@ function ParticipantContent({ id }: { id: string }) {
         </div>
       )}
 
-      {/* Top bar with logout */}
       {pageState !== "login" && (
         <div className="border-b border-[#e8e8ed] px-6 py-3 flex justify-end max-w-[680px] mx-auto">
           <button
@@ -251,52 +370,56 @@ function ParticipantContent({ id }: { id: string }) {
           </button>
         </div>
       )}
+
       <div className="mx-auto max-w-[680px] px-6 py-16">
-        {/* Instance header */}
+        {/* Header */}
         <div className="mb-12 text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-success/30 bg-success/10 px-3.5 py-1.5 text-sm text-success mb-5">
             <span className="size-1.5 rounded-full bg-success animate-pulse" />
-            Accepting submissions
+            {isProcurement ? "Accepting datasets" : "Accepting submissions"}
           </div>
           <h1 className="text-3xl font-bold tracking-apple-tight text-[#1d1d1f] mb-3">
-            Hackathon Novelty Scoring
+            {isProcurement ? "Confidential Data Procurement" : "Hackathon Novelty Scoring"}
           </h1>
           <p className="text-base text-[#6e6e73]">
-            Submit your idea for anonymous novelty scoring. Your data stays inside the enclave.
+            {isProcurement
+              ? "Submit your dataset for confidential evaluation. Raw rows never leave the enclave before agreement."
+              : "Submit your idea for anonymous novelty scoring. Your data stays inside the enclave."}
           </p>
         </div>
 
-        {/* Progress steps */}
-        <div className="flex items-center gap-2 mb-12 justify-center">
-          {(["Login", "Verify", "Submit", "Wait", "Results"] as const).map((label, i) => {
-            const stateOrder: PageState[] = ["login", "attest", "form", "pending", "results"]
-            const done = stateOrder.indexOf(pageState) > i
-            const active = stateOrder.indexOf(pageState) === i
-            return (
-              <React.Fragment key={label}>
-                <div className={cn(
-                  "flex items-center gap-1.5 text-sm",
-                  active && "text-primary font-medium",
-                  done && "text-success",
-                  !active && !done && "text-[#aeaeb2]",
-                )}>
-                  <span className={cn(
-                    "size-6 rounded-full flex items-center justify-center text-xs font-medium border",
-                    active && "bg-primary/10 border-primary/40 text-primary",
-                    done && "bg-success/10 border-success/40 text-success",
-                    !active && !done && "bg-[#f5f5f7] border-[#d2d2d7] text-[#aeaeb2]",
+        {/* Progress steps — hide for terminal procurement states */}
+        {!["released", "rejected", "awaiting_negotiation"].includes(pageState) && (
+          <div className="flex items-center gap-2 mb-12 justify-center flex-wrap">
+            {steps.map((label, i) => {
+              const done = stateOrder.indexOf(pageState) > i
+              const active = stateOrder.indexOf(pageState) === i
+              return (
+                <React.Fragment key={label}>
+                  <div className={cn(
+                    "flex items-center gap-1.5 text-sm",
+                    active && "text-primary font-medium",
+                    done && "text-success",
+                    !active && !done && "text-[#aeaeb2]",
                   )}>
-                    {done ? "✓" : i + 1}
-                  </span>
-                  {label}
-                </div>
-                {i < 4 && <ArrowRight className="size-3 text-[#d2d2d7] shrink-0" />}
-              </React.Fragment>
-            )
-          })}
-        </div>
+                    <span className={cn(
+                      "size-6 rounded-full flex items-center justify-center text-xs font-medium border",
+                      active && "bg-primary/10 border-primary/40 text-primary",
+                      done && "bg-success/10 border-success/40 text-success",
+                      !active && !done && "bg-[#f5f5f7] border-[#d2d2d7] text-[#aeaeb2]",
+                    )}>
+                      {done ? "✓" : i + 1}
+                    </span>
+                    {label}
+                  </div>
+                  {i < steps.length - 1 && <ArrowRight className="size-3 text-[#d2d2d7] shrink-0" />}
+                </React.Fragment>
+              )
+            })}
+          </div>
+        )}
 
-        {/* Step 0: Login */}
+        {/* ── LOGIN ── */}
         {pageState === "login" && (
           <div className="space-y-4 max-w-sm mx-auto">
             {authLoading ? (
@@ -305,7 +428,6 @@ function ParticipantContent({ id }: { id: string }) {
               </div>
             ) : !otpSent ? (
               <>
-                {/* GitHub */}
                 <button
                   onClick={async () => {
                     const { supabase } = await import("@/lib/supabase")
@@ -319,8 +441,6 @@ function ParticipantContent({ id }: { id: string }) {
                   <GithubLogo weight="fill" className="size-4" />
                   Continue with GitHub
                 </button>
-
-                {/* Google */}
                 <button
                   onClick={async () => {
                     const { supabase } = await import("@/lib/supabase")
@@ -339,25 +459,19 @@ function ParticipantContent({ id }: { id: string }) {
                   </svg>
                   Continue with Google
                 </button>
-
-                {/* Divider */}
                 <div className="flex items-center gap-3">
                   <div className="flex-1 h-px bg-[#e8e8ed]" />
                   <span className="text-xs text-[#aeaeb2]">or</span>
                   <div className="flex-1 h-px bg-[#e8e8ed]" />
                 </div>
-
-                {/* Email OTP */}
-                <div>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSendOtp()}
-                    placeholder="you@example.com"
-                    className="w-full rounded-xl border border-[#d2d2d7] bg-white px-4 py-2.5 text-sm text-[#1d1d1f] placeholder:text-[#aeaeb2] focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
-                  />
-                </div>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSendOtp()}
+                  placeholder="you@example.com"
+                  className="w-full rounded-xl border border-[#d2d2d7] bg-white px-4 py-2.5 text-sm text-[#1d1d1f] placeholder:text-[#aeaeb2] focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                />
                 {authError && <p className="text-sm text-red-500">{authError}</p>}
                 <button
                   onClick={handleSendOtp}
@@ -367,7 +481,7 @@ function ParticipantContent({ id }: { id: string }) {
                   Send one-time code
                 </button>
                 <p className="text-xs text-[#aeaeb2] text-center">
-                  We'll email you a 6-digit code. No password needed.
+                  We&apos;ll email you a 6-digit code. No password needed.
                 </p>
               </>
             ) : (
@@ -403,7 +517,7 @@ function ParticipantContent({ id }: { id: string }) {
           </div>
         )}
 
-        {/* Step 1: Attestation */}
+        {/* ── ATTEST ── */}
         {pageState === "attest" && (
           <div className="space-y-6">
             <AttestationWidget onVerified={() => setPageState("form")} />
@@ -413,14 +527,12 @@ function ParticipantContent({ id }: { id: string }) {
           </div>
         )}
 
-        {/* Step 2: Submission form */}
-        {pageState === "form" && (
+        {/* ── FORM — Hackathon ── */}
+        {pageState === "form" && !isProcurement && (
           <div className="space-y-6">
             <div className="flex items-center gap-2 text-sm text-success font-medium mb-3">
               <Check weight="bold" className="size-4" /> Enclave verified
             </div>
-
-            {/* Idea text */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium text-[#1d1d1f]">Idea description *</label>
@@ -441,11 +553,8 @@ function ParticipantContent({ id }: { id: string }) {
                 Sent directly to the enclave over TLS. Not stored anywhere outside.
               </p>
             </div>
-
-            {/* GitHub repo */}
             <div>
               <label className="text-sm font-medium text-[#1d1d1f] mb-2 block">GitHub repo</label>
-
               <div className="mb-3">
                 <p className="text-xs text-[#6e6e73] mb-1.5">Public repo URL</p>
                 <div className="flex gap-2">
@@ -461,24 +570,19 @@ function ParticipantContent({ id }: { id: string }) {
                   {repoSummary && !repoLoading && <Check className="size-4 text-success mt-2.5" />}
                 </div>
               </div>
-
               <div className="flex items-center gap-3">
                 <div className="flex-1 h-px bg-[#e8e8ed]" />
                 <span className="text-xs text-[#aeaeb2]">or</span>
                 <div className="flex-1 h-px bg-[#e8e8ed]" />
               </div>
-
               <div className="mt-3">
                 {githubConnected ? (
                   <div className="flex items-center justify-between rounded-xl border border-success/30 bg-success/5 px-4 py-3">
                     <div className="flex items-center gap-2 text-sm text-success">
                       <GithubLogo weight="fill" className="size-4" />
-                      <span>Connected: your-org/your-repo</span>
+                      <span>Connected</span>
                     </div>
-                    <button
-                      onClick={() => setGithubConnected(false)}
-                      className="text-sm text-[#6e6e73] hover:text-[#1d1d1f] transition-colors"
-                    >
+                    <button onClick={() => setGithubConnected(false)} className="text-sm text-[#6e6e73] hover:text-[#1d1d1f] transition-colors">
                       Disconnect
                     </button>
                   </div>
@@ -491,28 +595,19 @@ function ParticipantContent({ id }: { id: string }) {
                     Connect private GitHub repo
                   </button>
                 )}
-                <p className="text-xs text-[#aeaeb2] mt-1.5">
-                  Authorizes the enclave&apos;s GitHub App to fetch your repo. The app runs inside the TEE.
-                </p>
               </div>
             </div>
-
-            {/* Pitch deck */}
             <div>
-              <label className="text-sm font-medium text-[#1d1d1f] mb-2 block">
-                Pitch deck (optional)
-              </label>
+              <label className="text-sm font-medium text-[#1d1d1f] mb-2 block">Pitch deck (optional)</label>
               <div className="rounded-xl border border-dashed border-[#d2d2d7] bg-[#f5f5f7] px-4 py-10 text-center hover:border-primary/30 transition-colors cursor-pointer">
                 <FilePdf className="size-8 text-[#aeaeb2] mx-auto mb-2" />
                 <p className="text-sm text-[#6e6e73]">Drag & drop PDF or click to upload</p>
                 <p className="text-xs text-[#aeaeb2] mt-1">Sent directly to the enclave over TLS</p>
               </div>
             </div>
-
-            {/* Submit */}
             <button
-              onClick={handleSubmit}
-              disabled={!canSubmit}
+              onClick={handleHackathonSubmit}
+              disabled={!canHackathonSubmit}
               className="w-full flex items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-sm font-medium text-white hover:bg-[#5a2fd4] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
               {submitting ? (
@@ -524,7 +619,64 @@ function ParticipantContent({ id }: { id: string }) {
           </div>
         )}
 
-        {/* Step 3: Pending */}
+        {/* ── FORM — Procurement seller ── */}
+        {pageState === "form" && isProcurement && (
+          <div className="space-y-6">
+            <div className="flex items-center gap-2 text-sm text-success font-medium mb-3">
+              <Check weight="bold" className="size-4" /> Enclave verified
+            </div>
+            <DatasetUploadCard
+              datasetName={datasetName}
+              onDatasetNameChange={setDatasetName}
+              datasetReference={datasetReference}
+              onDatasetReferenceChange={setDatasetReference}
+              reservePrice={reservePrice}
+              onReservePriceChange={setReservePrice}
+              claims={sellerClaims}
+              onClaimsChange={setSellerClaims}
+              note={sellerNote}
+              onNoteChange={setSellerNote}
+            />
+            <button
+              onClick={handleDatasetSubmit}
+              disabled={!canDatasetSubmit}
+              className="w-full flex items-center justify-center gap-2 rounded-full bg-primary py-3.5 text-sm font-medium text-white hover:bg-[#5a2fd4] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+            >
+              <Lock weight="fill" className="size-4" /> Submit Dataset to Enclave
+            </button>
+          </div>
+        )}
+
+        {/* ── UPLOADING ── */}
+        {pageState === "uploading" && (
+          <div className="text-center py-12">
+            <CircleNotch className="size-10 text-primary animate-spin mx-auto mb-4" />
+            <p className="text-base font-medium text-[#1d1d1f] mb-2">Uploading to enclave…</p>
+            <p className="text-sm text-[#6e6e73]">Transferring dataset over TLS directly into the TEE.</p>
+          </div>
+        )}
+
+        {/* ── PENDING EVALUATION ── */}
+        {pageState === "pending_evaluation" && (
+          <div className="text-center py-8">
+            <div className="space-y-4 mb-10 text-left max-w-xs mx-auto">
+              <TimelineItem done label="Dataset submitted" detail={new Date().toLocaleString()} />
+              <TimelineItem active label="Enclave evaluating dataset" />
+              <TimelineItem label="Claim verification" />
+              <TimelineItem label="Evaluation complete" />
+            </div>
+            <div className="rounded-2xl border border-[#d2d2d7] bg-[#f5f5f7] p-5 text-left max-w-xs mx-auto mb-6">
+              <p className="text-xs text-[#6e6e73] mb-1.5">Submission ID</p>
+              <p className="font-mono text-sm text-[#1d1d1f]">{submissionId}</p>
+            </div>
+            <div className="rounded-xl border border-success/30 bg-success/5 px-4 py-3 text-sm text-success max-w-xs mx-auto">
+              <ShieldCheck weight="fill" className="size-4 inline mr-1.5" />
+              Raw rows are never exposed. Only aggregate metrics leave the enclave.
+            </div>
+          </div>
+        )}
+
+        {/* ── PENDING (hackathon) ── */}
         {pageState === "pending" && (
           <div className="text-center py-8">
             <div className="space-y-4 mb-10 text-left max-w-xs mx-auto">
@@ -546,18 +698,13 @@ function ParticipantContent({ id }: { id: string }) {
           </div>
         )}
 
-        {/* Step 4: Results */}
+        {/* ── RESULTS (hackathon) ── */}
         {pageState === "results" && result && (
           <div className="space-y-4">
             <div className="flex items-center gap-2 text-sm text-success font-medium mb-3">
               <Check weight="bold" className="size-4" /> Analysis complete
             </div>
-
-            <ResultDetail
-              result={result as unknown as Record<string, unknown>}
-              display={skillDisplay}
-            />
-
+            <ResultDetail result={result as unknown as Record<string, unknown>} display={skillDisplay} />
             {result.enclave_signature && (
               <div>
                 <p className="text-xs text-[#6e6e73] mb-2.5">Enclave signature</p>
@@ -568,6 +715,100 @@ function ParticipantContent({ id }: { id: string }) {
                 />
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── EVALUATION COMPLETE (procurement seller) ── */}
+        {pageState === "evaluation_complete" && procResult && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm text-success font-medium mb-1">
+              <Check weight="bold" className="size-4" /> Evaluation complete
+            </div>
+            <ProcurementScorecard
+              partialScore={procResult.partial_score}
+              proposedPayment={procResult.proposed_payment}
+              reservePrice={parseFloat(reservePrice.replace(/,/g, "")) || undefined}
+              role="seller"
+            />
+            <HardConstraintsCard constraints={procResult.hard_constraints} />
+            <MilestoneBreakdown milestones={procResult.milestones} />
+            {/* Claim results */}
+            {Object.keys(procResult.claim_results).length > 0 && (
+              <div className="rounded-2xl border border-[#d2d2d7] bg-white p-6">
+                <p className="text-sm font-semibold text-[#1d1d1f] mb-4">Claim Verification</p>
+                <div className="space-y-2">
+                  {Object.entries(procResult.claim_results).map(([claim, passed]) => (
+                    <div key={claim} className="flex items-center gap-2.5 text-sm">
+                      <span className={cn("size-4 rounded-full flex items-center justify-center text-[10px] font-bold", passed ? "bg-success/10 text-success" : "bg-red-50 text-red-500")}>
+                        {passed ? "✓" : "✗"}
+                      </span>
+                      <span className="text-[#1d1d1f]">{claim}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <NegotiationPanel
+              negotiation={procResult.negotiation}
+              role="seller"
+              reservePrice={parseFloat(reservePrice.replace(/,/g, "")) || undefined}
+              onAccept={handleAccept}
+              onReject={handleReject}
+              onRenegotiate={handleRenegotiate}
+            />
+            {procResult.enclave_signature && (
+              <EnclaveSigBadge
+                signature={procResult.enclave_signature}
+                verifyUrl="https://cloud-api.phala.network/api/v1/attestations/verify"
+                className="w-full"
+              />
+            )}
+          </div>
+        )}
+
+        {/* ── AWAITING NEGOTIATION ── */}
+        {pageState === "awaiting_negotiation" && (
+          <div className="text-center py-12 space-y-4">
+            <CircleNotch className="size-10 text-[#ff9f0a] animate-spin mx-auto" />
+            <p className="text-base font-medium text-[#1d1d1f]">Awaiting buyer response</p>
+            <p className="text-sm text-[#6e6e73]">
+              Your revised reserve price has been submitted to the enclave. The buyer will be notified.
+            </p>
+            <div className="rounded-2xl border border-[#d2d2d7] bg-[#f5f5f7] p-5 max-w-xs mx-auto text-left">
+              <p className="text-xs text-[#6e6e73] mb-1.5">Submission ID</p>
+              <p className="font-mono text-sm text-[#1d1d1f]">{submissionId}</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── RELEASED ── */}
+        {pageState === "released" && procResult?.release_token && (
+          <div className="space-y-4">
+            <div className="text-center mb-6">
+              <div className="size-16 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-4">
+                <Check weight="bold" className="size-8 text-success" />
+              </div>
+              <h2 className="text-2xl font-bold text-[#1d1d1f] mb-2">Deal complete</h2>
+              <p className="text-[#6e6e73] text-sm">Settlement has been authorized for your dataset.</p>
+            </div>
+            <div className="rounded-2xl border border-[#d2d2d7] bg-white p-5">
+              <p className="text-xs text-[#6e6e73] mb-1">Settlement amount</p>
+              <p className="text-3xl font-bold text-[#1d1d1f]">${procResult.proposed_payment.toLocaleString()}</p>
+            </div>
+            <ReleaseTokenCard token={procResult.release_token} />
+          </div>
+        )}
+
+        {/* ── REJECTED ── */}
+        {pageState === "rejected" && (
+          <div className="text-center py-12 space-y-4">
+            <div className="size-16 rounded-full bg-red-50 flex items-center justify-center mx-auto">
+              <span className="text-3xl">✗</span>
+            </div>
+            <h2 className="text-2xl font-bold text-[#1d1d1f]">Deal rejected</h2>
+            <p className="text-sm text-[#6e6e73]">
+              This deal did not proceed. No data was shared outside the enclave.
+            </p>
           </div>
         )}
       </div>

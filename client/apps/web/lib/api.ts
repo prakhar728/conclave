@@ -5,8 +5,11 @@ import type {
   InitRequest,
   InitResponse,
   NoveltyResult,
+  ProcurementResult,
+  ReleaseToken,
   SkillCard,
   SubmitResponse,
+  SupplierSubmission,
 } from "./types"
 
 const MOCK = false
@@ -89,6 +92,42 @@ const MOCK_ATTESTATION: AttestationResponse = {
     "0x04000200810000001f00210000000000000000000000000000000000000000000000000000000000000000000000000000000000000015000000e00000000000000096126d6b7d5a96cd96d2e1e7e17e2a21c09b0d2d8cbb30c2e1e4",
   verify_url: "https://cloud-api.phala.network/api/v1/attestations/verify",
 }
+
+const MOCK_PROCUREMENT_RESULTS: ProcurementResult[] = [
+  {
+    submission_id: "proc_001",
+    hard_constraints: [
+      { name: "Required columns present", passed: true },
+      { name: "Min row count (1,000)", passed: true },
+      { name: "Max null rate (5%)", passed: false, detail: "Null rate: 7.2%" },
+      { name: "No forbidden columns", passed: true },
+    ],
+    milestones: [
+      { name: "Data completeness", weight: 0.3, score: 0.85, passed: true },
+      { name: "Schema compliance", weight: 0.25, score: 1.0, passed: true },
+      { name: "Distribution quality", weight: 0.25, score: 0.72, passed: true },
+      { name: "Claim verification", weight: 0.2, score: 0.6, passed: true },
+    ],
+    claim_results: {
+      "10,000+ rows": true,
+      "No PII columns": true,
+      "Label rate > 80%": false,
+    },
+    partial_score: 0.79,
+    proposed_payment: 7900,
+    negotiation: { state: "none", used: false },
+    settlement: { state: "none" },
+    dataset_metrics: {
+      row_count: 12500,
+      null_rate: 0.072,
+      duplicate_rate: 0.01,
+      column_count: 14,
+      columns_present: ["id", "label", "feature_1", "feature_2"],
+      columns_missing: [],
+    },
+    enclave_signature: "0xdeadbeef5678...",
+  },
+]
 
 const MOCK_RESULTS: NoveltyResult[] = [
   {
@@ -300,6 +339,67 @@ export const api = {
       return { results: MOCK_RESULTS }
     }
     return get("/results", token)
+  },
+
+  // --- Procurement ---
+  submitDataset: async (token: string, submission: SupplierSubmission): Promise<SubmitResponse> => {
+    await delay(800)
+    return {
+      submission_id: `proc_${Math.random().toString(36).slice(2, 9)}`,
+      status: "received_pending",
+      submissions_count: 1,
+    }
+  },
+
+  getProcurementResult: async (
+    token: string,
+    submission_id: string,
+  ): Promise<ProcurementResult> => {
+    await delay(400)
+    const r = MOCK_PROCUREMENT_RESULTS.find((r) => r.submission_id === submission_id)
+    return r ?? MOCK_PROCUREMENT_RESULTS[0]!
+  },
+
+  getProcurementResults: async (token: string): Promise<{ results: ProcurementResult[] }> => {
+    await delay(400)
+    return { results: MOCK_PROCUREMENT_RESULTS }
+  },
+
+  acceptDeal: async (token: string, submission_id: string): Promise<{ status: string }> => {
+    await delay(300)
+    return { status: "accepted" }
+  },
+
+  rejectDeal: async (token: string, submission_id: string): Promise<{ status: string }> => {
+    await delay(300)
+    return { status: "rejected" }
+  },
+
+  requestNegotiation: async (
+    token: string,
+    submission_id: string,
+    revised_value: number,
+  ): Promise<{ status: string }> => {
+    await delay(300)
+    return { status: "negotiation_requested" }
+  },
+
+  submitRenegotiation: async (
+    token: string,
+    submission_id: string,
+    revised_value: number,
+  ): Promise<{ status: string }> => {
+    await delay(300)
+    return { status: "renegotiation_submitted" }
+  },
+
+  getReleaseToken: async (token: string, submission_id: string): Promise<ReleaseToken> => {
+    await delay(300)
+    return {
+      token: `tok_${Math.random().toString(36).slice(2, 18)}`,
+      issued_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+    }
   },
 }
 

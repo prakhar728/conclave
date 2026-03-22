@@ -12,5 +12,6 @@ venv/
 .venv/
 .mcp.json
 /plan
+/plans/
 eval_results/
 scripts/
