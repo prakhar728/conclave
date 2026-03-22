@@ -733,3 +733,98 @@ class TestSkillCard:
 
     def test_threshold_is_one(self):
         assert skill_card.config["min_submissions"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Agent layer
+# ---------------------------------------------------------------------------
+
+from skills.confidential_data_procurement.agent import _parse_agent_output, _safe_defaults
+from skills.confidential_data_procurement.tools import (
+    get_column_stats,
+    get_schema_summary,
+    get_value_distribution,
+    set_context,
+)
+
+
+_AGENT_JSON = (
+    '{"schema_score": 0.8, "claim_veracity_score": 0.9, '
+    '"schema_matching": {"transaction_id": "txn_id", "amount": "amount"}, '
+    '"claim_verification": {"no_nulls": "disputed"}, '
+    '"explanation": "Dataset looks reasonable."}'
+)
+
+
+class TestParseAgentOutput:
+    def test_valid_json_extracted(self):
+        policy = _make_policy()
+        result = _parse_agent_output(_AGENT_JSON, policy, {"no_nulls": "true"})
+        assert result["schema_score"] == pytest.approx(0.8)
+        assert result["claim_veracity_score"] == pytest.approx(0.9)
+        assert result["schema_matching"]["transaction_id"] == "txn_id"
+        assert result["explanation"] == "Dataset looks reasonable."
+
+    def test_clamped_scores(self):
+        policy = _make_policy()
+        bad = '{"schema_score": 2.5, "claim_veracity_score": -0.1, "explanation": "x"}'
+        result = _parse_agent_output(bad, policy, {})
+        assert result["schema_score"] == 1.0
+        assert result["claim_veracity_score"] == 0.0
+
+    def test_markdown_fences_stripped(self):
+        policy = _make_policy()
+        wrapped = f"```json\n{_AGENT_JSON}\n```"
+        result = _parse_agent_output(wrapped, policy, {})
+        assert result["schema_score"] == pytest.approx(0.8)
+
+    def test_unparseable_returns_defaults(self):
+        policy = _make_policy()
+        result = _parse_agent_output("Sorry, I could not evaluate.", policy, {"claim": "x"})
+        assert result["schema_score"] == 0.5
+        assert result["claim_veracity_score"] == 1.0
+
+    def test_safe_defaults_structure(self):
+        policy = _make_policy()
+        result = _safe_defaults(policy, {"low_nulls": "true"})
+        assert "schema_matching" in result
+        assert "claim_verification" in result
+        assert result["claim_verification"]["low_nulls"] == "unverifiable"
+
+
+class TestTools:
+    def setup_method(self):
+        self.df = _make_df(rows=50)
+        self.dataset_id = _register_df(self.df)
+        set_context(self.dataset_id, {
+            "required_columns": ["transaction_id", "amount"],
+            "column_definitions": {},
+            "seller_claims": {},
+        })
+
+    def teardown_method(self):
+        from skills.confidential_data_procurement.ingest import cleanup
+        cleanup(self.dataset_id)
+
+    def test_schema_summary_passes_validator(self):
+        result = get_schema_summary.invoke({})
+        assert "transaction_id" in result
+        assert "rows:" in result
+
+    def test_column_stats_numeric(self):
+        result = get_column_stats.invoke({"column_name": "amount"})
+        assert "numeric" in result
+        assert "mean" in result
+
+    def test_column_stats_missing_column(self):
+        result = get_column_stats.invoke({"column_name": "nonexistent"})
+        assert "not found" in result.lower()
+
+    def test_value_distribution(self):
+        result = get_value_distribution.invoke({"column_name": "is_fraud", "top_n": 5})
+        assert "is_fraud" in result
+        assert "distinct" in result
+
+    def test_value_distribution_capped_at_20(self):
+        result = get_value_distribution.invoke({"column_name": "amount", "top_n": 999})
+        assert "top-20" in result
