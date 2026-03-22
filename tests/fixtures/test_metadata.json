@@ -1,0 +1,15 @@
+{
+  "column_definitions": {
+    "transaction_id": "Unique transaction identifier",
+    "amount": "Transaction amount in USD",
+    "merchant_category": "Merchant category code",
+    "country": "ISO 2-letter country code",
+    "is_fraud": "Binary fraud label (1=fraud, 0=legitimate)"
+  },
+  "seller_claims": {
+    "source": "Internal payment processing system",
+    "date_range": "2024-01-01 to 2024-12-31",
+    "row_count": "200",
+    "fraud_rate": "~4%"
+  }
+}
