@@ -734,6 +734,10 @@ class TestSkillCard:
     def test_threshold_is_one(self):
         assert skill_card.config["min_submissions"] == 1
 
+    def test_respond_handler_registered(self):
+        from skills.confidential_data_procurement import procurement_respond_handler
+        assert skill_card.respond_handler is procurement_respond_handler
+
 
 # ---------------------------------------------------------------------------
 # Agent layer
@@ -828,3 +832,147 @@ class TestTools:
     def test_value_distribution_capped_at_20(self):
         result = get_value_distribution.invoke({"column_name": "amount", "top_n": 999})
         assert "top-20" in result
+
+
+# ---------------------------------------------------------------------------
+# respond_handler + renegotiation (3×3 matrix)
+# ---------------------------------------------------------------------------
+
+from skills.confidential_data_procurement import procurement_respond_handler
+
+
+def _base_result(deal=True) -> dict:
+    return {
+        "submission_id": "sub-1",
+        "deal": deal,
+        "quality_score": 0.75,
+        "proposed_payment": 3000.0,
+        "hard_constraints_pass": True,
+        "settlement_status": "pending_approval" if deal else "rejected",
+        "release_token": None,
+        "notes": [],
+        "explanation": None,
+        "claim_verification": None,
+        "schema_matching": None,
+        "buyer_response": None,
+        "supplier_response": None,
+        "renegotiation_used": False,
+        "revised_budget": None,
+        "revised_reserve": None,
+    }
+
+
+class TestRespondHandler:
+    # --- First response only → awaiting_counterparty ---
+
+    def test_first_buyer_response_awaits_counterparty(self):
+        r = procurement_respond_handler(_base_result(), "accept", None, "buyer", _make_policy())
+        assert r["settlement_status"] == "awaiting_counterparty"
+        assert r["buyer_response"] == "accept"
+        assert r["supplier_response"] is None
+
+    def test_first_supplier_response_awaits_counterparty(self):
+        r = procurement_respond_handler(_base_result(), "accept", None, "supplier", _make_policy())
+        assert r["settlement_status"] == "awaiting_counterparty"
+        assert r["supplier_response"] == "accept"
+
+    # --- Both accept → authorized ---
+
+    def test_both_accept_authorized(self):
+        result = _base_result()
+        result["buyer_response"] = "accept"
+        r = procurement_respond_handler(result, "accept", None, "supplier", _make_policy())
+        assert r["settlement_status"] == "authorized"
+        assert r["deal"] is True
+        assert r["release_token"] is not None
+
+    # --- Any reject → rejected ---
+
+    def test_buyer_reject_rejected(self):
+        result = _base_result()
+        result["supplier_response"] = "accept"
+        r = procurement_respond_handler(result, "reject", None, "buyer", _make_policy())
+        assert r["settlement_status"] == "rejected"
+        assert r["deal"] is False
+
+    def test_supplier_reject_rejected(self):
+        result = _base_result()
+        result["buyer_response"] = "accept"
+        r = procurement_respond_handler(result, "reject", None, "supplier", _make_policy())
+        assert r["settlement_status"] == "rejected"
+
+    def test_both_reject_rejected(self):
+        result = _base_result()
+        result["buyer_response"] = "reject"
+        r = procurement_respond_handler(result, "reject", None, "supplier", _make_policy())
+        assert r["settlement_status"] == "rejected"
+
+    def test_renegotiate_then_reject_rejected(self):
+        result = _base_result()
+        result["buyer_response"] = "renegotiate"
+        result["revised_budget"] = 2500.0
+        result["renegotiation_used"] = False
+        r = procurement_respond_handler(result, "reject", None, "supplier", _make_policy())
+        assert r["settlement_status"] == "rejected"
+
+    # --- accept + renegotiate → authorized at proposed_payment ---
+
+    def test_buyer_accept_supplier_renegotiate_authorized(self):
+        result = _base_result()
+        result["buyer_response"] = "accept"
+        r = procurement_respond_handler(result, "renegotiate", 3500.0, "supplier", _make_policy())
+        assert r["settlement_status"] == "authorized"
+        assert r["renegotiation_used"] is True
+        assert r["release_token"] is not None
+
+    def test_supplier_accept_buyer_renegotiate_authorized(self):
+        result = _base_result()
+        result["supplier_response"] = "accept"
+        r = procurement_respond_handler(result, "renegotiate", 2500.0, "buyer", _make_policy())
+        assert r["settlement_status"] == "authorized"
+        assert r["renegotiation_used"] is True
+
+    # --- Both renegotiate ---
+
+    def test_both_renegotiate_deal_succeeds(self):
+        result = _base_result()
+        result["buyer_response"] = "renegotiate"
+        result["revised_budget"] = 3000.0
+        r = procurement_respond_handler(result, "renegotiate", 2500.0, "supplier", _make_policy())
+        assert r["settlement_status"] == "authorized"
+        assert r["proposed_payment"] == 3000.0
+        assert r["renegotiation_used"] is True
+
+    def test_both_renegotiate_deal_fails(self):
+        result = _base_result()
+        result["buyer_response"] = "renegotiate"
+        result["revised_budget"] = 1000.0
+        r = procurement_respond_handler(result, "renegotiate", 2000.0, "supplier", _make_policy())
+        assert r["settlement_status"] == "rejected"
+        assert r["deal"] is False
+        assert any("renegotiation failed" in n.lower() for n in r["notes"])
+
+    # --- Validation errors ---
+
+    def test_second_renegotiation_raises(self):
+        result = _base_result()
+        result["renegotiation_used"] = True
+        result["buyer_response"] = "renegotiate"
+        with pytest.raises(ValueError, match="already used"):
+            procurement_respond_handler(result, "renegotiate", 2000.0, "supplier", _make_policy())
+
+    def test_renegotiate_without_value_raises(self):
+        with pytest.raises(ValueError, match="revised_value is required"):
+            procurement_respond_handler(_base_result(), "renegotiate", None, "buyer", _make_policy())
+
+    def test_buyer_revised_above_budget_raises(self):
+        with pytest.raises(ValueError, match="max budget"):
+            procurement_respond_handler(
+                _base_result(), "renegotiate", 99999.0, "buyer", _make_policy()
+            )
+
+    def test_supplier_negative_reserve_raises(self):
+        with pytest.raises(ValueError, match="negative"):
+            procurement_respond_handler(
+                _base_result(), "renegotiate", -100.0, "supplier", _make_policy()
+            )
