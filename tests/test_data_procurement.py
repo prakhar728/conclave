@@ -628,6 +628,7 @@ from skills.confidential_data_procurement import run_skill, skill_card
 
 
 class TestRunSkill:
+    @pytest.mark.live
     def test_good_dataset_returns_deal(self):
         df = _make_df(rows=200)
         policy = _make_policy(min_rows=100, max_budget=5000.0, base_price=500.0)
@@ -670,6 +671,7 @@ class TestRunSkill:
         finally:
             cleanup(dataset_id)
 
+    @pytest.mark.live
     def test_reserve_above_payment_no_deal(self):
         df = _make_df(rows=150)
         policy = _make_policy(min_rows=100, max_budget=1000.0, base_price=0.0)
@@ -688,6 +690,7 @@ class TestRunSkill:
         finally:
             cleanup(dataset_id)
 
+    @pytest.mark.live
     def test_internal_fields_stripped_by_guardrails(self):
         """revised_budget and revised_reserve should not appear in output."""
         df = _make_df(rows=200)
