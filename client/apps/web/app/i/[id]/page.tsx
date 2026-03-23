@@ -120,24 +120,22 @@ function ParticipantContent({ id }: { id: string }) {
   }
 
   React.useEffect(() => {
-    api.checkInstance(id).then((inst) => {
+    const cached = localStorage.getItem(TOKEN_CACHE_KEY(id))
+
+    api.checkInstance(id).then(async (inst) => {
       const proc = inst.skill_name === "confidential_data_procurement"
       setIsProcurement(proc)
       if (!proc && inst.skill_name) {
-        api.getSkill(inst.skill_name).then((card) => {
-          if (card.user_display) setSkillDisplay(card.user_display)
-        }).catch(() => {})
+        const card = await api.getSkill(inst.skill_name).catch(() => null)
+        if (card?.user_display) setSkillDisplay(card.user_display)
+      }
+      if (cached) {
+        setUserToken(cached)
+        await checkPriorSubmission(cached, proc)
       }
     }).catch(() => setInstanceMissing(true))
 
-    const cached = localStorage.getItem(TOKEN_CACHE_KEY(id))
     if (cached) {
-      setUserToken(cached)
-      // Detect procurement before checking prior submissions
-      api.checkInstance(id).then((inst) => {
-        const proc = inst.skill_name === "confidential_data_procurement"
-        checkPriorSubmission(cached, proc)
-      }).catch(() => {})
       return
     }
     import("@/lib/supabase").then(({ supabase }) => {
@@ -161,6 +159,10 @@ function ParticipantContent({ id }: { id: string }) {
           saveToken(user_token)
           const inst = await api.checkInstance(id)
           const proc = inst.skill_name === "confidential_data_procurement"
+          if (!proc && inst.skill_name) {
+            const card = await api.getSkill(inst.skill_name).catch(() => null)
+            if (card?.user_display) setSkillDisplay(card.user_display)
+          }
           await checkPriorSubmission(user_token, proc)
         } catch (err) {
           handleAuthError(err)
