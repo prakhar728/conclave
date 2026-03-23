@@ -4,6 +4,7 @@ import { cn } from "@workspace/ui/lib/utils"
 import type { MilestoneScore } from "@/lib/types"
 
 export function MilestoneBreakdown({ milestones }: { milestones: MilestoneScore[] }) {
+  if (milestones.length === 0) return null
   const weightedScore = milestones.reduce((acc, m) => acc + m.score * m.weight, 0)
 
   return (

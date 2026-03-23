@@ -33,30 +33,32 @@ export function ProcurementScorecard({
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        {/* Score gauge */}
-        <div className="text-center">
-          <p className="text-xs text-[#6e6e73] mb-3">Score (S)</p>
-          <div className="relative inline-flex items-center justify-center">
-            <svg className="size-24 -rotate-90" viewBox="0 0 100 100">
-              <circle cx="50" cy="50" r="42" fill="none" stroke="#f5f5f7" strokeWidth="8" />
-              <circle
-                cx="50"
-                cy="50"
-                r="42"
-                fill="none"
-                stroke={scoreColor}
-                strokeWidth="8"
-                strokeDasharray={`${strokeDash} ${circumference}`}
-                strokeLinecap="round"
-              />
-            </svg>
-            <span className="absolute text-2xl font-bold text-[#1d1d1f]">
-              {(pct * 100).toFixed(0)}
-            </span>
+      <div className={role === "seller" ? "flex justify-center" : "grid grid-cols-2 gap-4"}>
+        {/* Score gauge — buyer only (seller cannot see quality score) */}
+        {role !== "seller" && (
+          <div className="text-center">
+            <p className="text-xs text-[#6e6e73] mb-3">Score (S)</p>
+            <div className="relative inline-flex items-center justify-center">
+              <svg className="size-24 -rotate-90" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="42" fill="none" stroke="#f5f5f7" strokeWidth="8" />
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="42"
+                  fill="none"
+                  stroke={scoreColor}
+                  strokeWidth="8"
+                  strokeDasharray={`${strokeDash} ${circumference}`}
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span className="absolute text-2xl font-bold text-[#1d1d1f]">
+                {(pct * 100).toFixed(0)}
+              </span>
+            </div>
+            <p className="text-xs text-[#aeaeb2] mt-1">out of 100</p>
           </div>
-          <p className="text-xs text-[#aeaeb2] mt-1">out of 100</p>
-        </div>
+        )}
 
         {/* Payment */}
         <div className="text-center flex flex-col justify-center">

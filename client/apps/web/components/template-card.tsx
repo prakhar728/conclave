@@ -15,15 +15,6 @@ export interface Template {
 
 export const TEMPLATE_CATALOG: Template[] = [
   {
-    name: "Hackathon Judge",
-    skill_name: "hackathon_novelty",
-    icon: "⚡",
-    status: "live",
-    goesIn: ["Idea text", "Pitch deck (PDF)", "GitHub repo"],
-    comesOut: ["Novelty score", "Criteria scores", "Cluster label"],
-    neverLeaves: ["Raw idea content", "Deck text"],
-  },
-  {
     name: "Confidential Data Procurement",
     skill_name: "confidential_data_procurement",
     icon: "🔐",
@@ -45,6 +36,15 @@ export const TEMPLATE_CATALOG: Template[] = [
       "Sensitive fields",
       "Supplier private data before agreement",
     ],
+  },
+  {
+    name: "Hackathon Judge",
+    skill_name: "hackathon_novelty",
+    icon: "⚡",
+    status: "live",
+    goesIn: ["Idea text", "Pitch deck (PDF)", "GitHub repo"],
+    comesOut: ["Novelty score", "Criteria scores", "Cluster label"],
+    neverLeaves: ["Raw idea content", "Deck text"],
   },
   {
     name: "Investor Memo Scorer",
@@ -80,7 +80,7 @@ export function TemplateCard({ template, selectable, selected, onSelect }: Templ
     <div
       onClick={selectable && isLive ? onSelect : undefined}
       className={cn(
-        "rounded-2xl border bg-white p-6 transition-all",
+        "rounded-2xl border bg-white p-6 transition-all h-full",
         isLive && selectable && "cursor-pointer",
         !isLive && "opacity-50 cursor-not-allowed select-none",
         isLive && selected

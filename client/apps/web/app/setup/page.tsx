@@ -101,7 +101,7 @@ function SetupContent() {
           created_at: new Date().toISOString(),
         }),
       )
-      setTimeout(() => setStep(3), 1000)
+      // Don't auto-advance — let the user click "Move ahead" in the preview panel
     } else {
       setMessages((m) => [...m, { role: "assistant", content: res.message }])
       if (isProcurement) updateProcurementPreview(userMsg)
@@ -202,7 +202,7 @@ function SetupContent() {
 
           {/* Step indicator */}
           <div className="flex items-center gap-2 text-sm">
-            {(["Choose Template", "Configure", "Ready"] as const).map((label, i) => {
+            {(["Choose Instance", "Configure", "Ready"] as const).map((label, i) => {
               const n = (i + 1) as Step
               const active = step === n
               const done = step > n
@@ -234,34 +234,43 @@ function SetupContent() {
         </div>
       </div>
 
-      {/* Step 1 — Choose Template */}
+      {/* Step 1 — Choose Instance */}
       {step === 1 && (
-        <div className="mx-auto max-w-[980px] px-6 py-16">
-          <h1 className="text-3xl font-bold tracking-apple-tight text-[#1d1d1f] mb-3">
-            Choose a template
-          </h1>
-          <p className="text-base text-[#6e6e73] mb-10">
-            Select the skill that matches your use case.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-            {TEMPLATE_CATALOG.map((t) => (
-              <TemplateCard
-                key={t.name}
-                template={t}
-                selectable
-                selected={selectedSkill === t.skill_name}
-                onSelect={() => setSelectedSkill(t.skill_name)}
-              />
-            ))}
+        <div className="flex flex-col h-[calc(100vh-65px)]">
+          <div className="px-6 pt-12 pb-6 mx-auto w-full max-w-[980px]">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <h1 className="text-3xl font-bold tracking-apple-tight text-[#1d1d1f] mb-2">
+                  Choose an instance
+                </h1>
+                <p className="text-base text-[#6e6e73]">
+                  Select the skill that matches your use case.
+                </p>
+              </div>
+              <button
+                onClick={() => setStep(2)}
+                disabled={!selectedSkill}
+                className="flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-[#5a2fd4] disabled:opacity-40 disabled:cursor-not-allowed transition-all shrink-0"
+              >
+                Next <ArrowRight className="size-4" />
+              </button>
+            </div>
           </div>
-          <div className="flex justify-end">
-            <button
-              onClick={() => setStep(2)}
-              disabled={!selectedSkill}
-              className="flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-[#5a2fd4] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-            >
-              Next <ArrowRight className="size-4" />
-            </button>
+
+          {/* Horizontal scroll row */}
+          <div className="flex-1 overflow-y-hidden px-6 pb-8">
+            <div className="flex gap-5 h-full overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-hide">
+              {TEMPLATE_CATALOG.map((t) => (
+                <div key={t.name} className="snap-start shrink-0 w-[320px] h-full">
+                  <TemplateCard
+                    template={t}
+                    selectable
+                    selected={selectedSkill === t.skill_name}
+                    onSelect={() => setSelectedSkill(t.skill_name)}
+                  />
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -270,8 +279,8 @@ function SetupContent() {
       {step === 2 && (
         <div className="mx-auto max-w-[980px] px-6 py-8 flex gap-6 h-[calc(100vh-130px)]">
           {/* Chat panel */}
-          <div className="flex-1 flex flex-col min-w-0">
-            <div className="flex-1 overflow-y-auto space-y-4 pr-2 pb-4">
+          <div className="flex-1 flex flex-col min-w-0 min-h-0">
+            <div className="flex-1 overflow-y-auto min-h-0 space-y-4 pr-2 pb-4">
               {messages.map((m, i) => (
                 <ChatMessage key={i} role={m.role} content={m.content} />
               ))}
@@ -281,12 +290,22 @@ function SetupContent() {
 
             {/* Input */}
             <div className="flex gap-3 pt-4 border-t border-[#e8e8ed]">
-              <input
+              <textarea
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
+                onChange={(e) => {
+                  setInput(e.target.value)
+                  e.target.style.height = "auto"
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    sendMessage()
+                  }
+                }}
                 placeholder={isProcurement ? "Describe your procurement policy — budget, required columns, milestones…" : "Describe your hackathon, criteria, guidelines…"}
-                className="flex-1 rounded-xl border border-[#d2d2d7] bg-white px-4 py-2.5 text-sm text-[#1d1d1f] placeholder:text-[#aeaeb2] focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                rows={1}
+                className="flex-1 rounded-xl border border-[#d2d2d7] bg-white px-4 py-2.5 text-sm text-[#1d1d1f] placeholder:text-[#aeaeb2] focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all resize-none overflow-y-auto max-h-[120px]"
                 disabled={isTyping}
               />
               <button
@@ -300,8 +319,8 @@ function SetupContent() {
           </div>
 
           {/* Config preview panel */}
-          <div className="hidden lg:block w-72 shrink-0">
-            <div className="rounded-2xl border border-[#d2d2d7] bg-[#f5f5f7] p-5 sticky top-6">
+          <div className="hidden lg:flex lg:flex-col w-72 shrink-0 gap-3">
+            <div className="rounded-2xl border border-[#d2d2d7] bg-[#f5f5f7] p-5 overflow-y-auto flex-1">
               <p className="text-xs font-semibold text-[#6e6e73] uppercase tracking-widest mb-5">
                 {isProcurement ? "Policy Preview" : "Config Preview"}
               </p>
@@ -346,6 +365,15 @@ function SetupContent() {
                 </div>
               )}
             </div>
+
+            {result && (
+              <button
+                onClick={() => setStep(3)}
+                className="w-full flex items-center justify-center gap-2 rounded-full bg-primary py-3 text-sm font-medium text-white hover:bg-[#5a2fd4] transition-all"
+              >
+                Move ahead <ArrowRight className="size-4" />
+              </button>
+            )}
           </div>
         </div>
       )}

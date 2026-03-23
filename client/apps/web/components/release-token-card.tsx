@@ -1,16 +1,36 @@
 "use client"
 
 import * as React from "react"
-import { Key, Copy, Check } from "@phosphor-icons/react"
+import { Key, Copy, Check, DownloadSimple } from "@phosphor-icons/react"
 import type { ReleaseToken } from "@/lib/types"
+
+const TEE_URL = process.env.NEXT_PUBLIC_TEE_URL ?? "http://localhost:8000"
 
 export function ReleaseTokenCard({ token }: { token: ReleaseToken }) {
   const [copied, setCopied] = React.useState(false)
+  const [downloading, setDownloading] = React.useState(false)
 
   async function copyToken() {
     await navigator.clipboard.writeText(token.token)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  async function downloadDataset() {
+    setDownloading(true)
+    try {
+      const res = await fetch(`${TEE_URL}/download/${token.token}`)
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `dataset_${token.token.slice(0, 8)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setDownloading(false)
+    }
   }
 
   const issued = new Date(token.issued_at).toLocaleString()
@@ -23,7 +43,7 @@ export function ReleaseTokenCard({ token }: { token: ReleaseToken }) {
         <p className="text-sm font-semibold text-success">Download Token Issued</p>
       </div>
 
-      <div className="rounded-xl border border-success/20 bg-white px-4 py-3 mb-3">
+      <div className="rounded-xl border border-success/20 bg-white px-4 py-3 mb-4">
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-[10px] font-semibold text-[#6e6e73] uppercase tracking-widest">Token</span>
           <button
@@ -40,7 +60,16 @@ export function ReleaseTokenCard({ token }: { token: ReleaseToken }) {
         <p className="font-mono text-xs text-[#1d1d1f] break-all leading-relaxed">{token.token}</p>
       </div>
 
-      <div className="space-y-1 text-xs text-[#6e6e73]">
+      <button
+        onClick={downloadDataset}
+        disabled={downloading}
+        className="w-full flex items-center justify-center gap-2 rounded-full bg-success py-3 text-sm font-medium text-white hover:bg-success/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+      >
+        <DownloadSimple weight="bold" className="size-4" />
+        {downloading ? "Downloading…" : "Download Dataset CSV"}
+      </button>
+
+      <div className="space-y-1 text-xs text-[#6e6e73] mt-3">
         <p>Issued: <span className="text-[#1d1d1f]">{issued}</span></p>
         {expires && <p>Expires: <span className="text-[#1d1d1f]">{expires}</span></p>}
       </div>

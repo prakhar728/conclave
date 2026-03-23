@@ -33,6 +33,7 @@ ALLOWED_OUTPUT_KEYS: set[str] = {
     "submission_id",
     "deal",
     "quality_score",           # buyer-only (budget leak if supplier sees this + proposed_payment)
+    "component_scores",        # buyer-only (same reasoning as quality_score)
     "proposed_payment",
     "hard_constraints_pass",   # buyer-only
     "settlement_status",
@@ -44,6 +45,8 @@ ALLOWED_OUTPUT_KEYS: set[str] = {
     "buyer_response",
     "supplier_response",
     "renegotiation_used",
+    "revised_budget",    # buyer's counter-offer — disclosed to seller during renegotiation
+    "revised_reserve",   # seller's counter-offer — disclosed to buyer during renegotiation
 }
 
 # Supplier (participant) — same info, quality_score and hard_constraints_pass withheld
@@ -60,6 +63,7 @@ USER_OUTPUT_KEYS: set[str] = {
     "buyer_response",
     "supplier_response",
     "renegotiation_used",
+    "revised_budget",    # buyer's counter-offer — visible to seller so they can respond
 }
 
 # --- Score bounds (used by guardrails for clamping) ---

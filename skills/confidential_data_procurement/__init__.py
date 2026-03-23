@@ -61,6 +61,7 @@ def run_skill(inputs: list[SupplierSubmission], params: BuyerPolicy) -> SkillRes
                 submission_id=sub.submission_id,
                 deal=False,
                 quality_score=0.0,
+                component_scores={},
                 proposed_payment=params.base_price,
                 hard_constraints_pass=False,
                 settlement_status="rejected",
@@ -93,6 +94,7 @@ def run_skill(inputs: list[SupplierSubmission], params: BuyerPolicy) -> SkillRes
                 submission_id=sub.submission_id,
                 deal=deal,
                 quality_score=quality_score,
+                component_scores=component_scores,
                 proposed_payment=proposed_payment,
                 hard_constraints_pass=metrics.hard_constraints_pass,
                 settlement_status=settlement_status,
@@ -102,7 +104,9 @@ def run_skill(inputs: list[SupplierSubmission], params: BuyerPolicy) -> SkillRes
                 claim_verification=agent_result.get("claim_verification"),
             )
 
-        results.append(result.model_dump())
+        result_dict = result.model_dump()
+        result_dict["_dataset_id"] = sub.dataset_id  # internal — for post-deal download
+        results.append(result_dict)
 
     # Guardrails — admin-level filter stores all allowed keys.
     # Role-based filtering (buyer vs supplier) happens in routes.py GET /results.

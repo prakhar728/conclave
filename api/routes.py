@@ -1,14 +1,20 @@
 from __future__ import annotations
 import asyncio
+import logging
 import secrets
+import traceback
 import uuid
 from functools import partial
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.datastructures import FormData
+from fastapi.responses import Response
+
+logger = logging.getLogger(__name__)
 
 from core.models import SkillResponse, InitRequest, InitResponse
 from skills.router import SkillRouter
+from skills.confidential_data_procurement.ingest import store_authorized_download, get_download_bytes
 
 router = APIRouter()
 
@@ -376,11 +382,20 @@ async def upload_file(request: Request):
 
     try:
         form: FormData = await request.form()
-        loop = asyncio.get_event_loop()
+        logger.info("upload: form fields received: %s", list(form.keys()))
+        for key in form.keys():
+            val = form.get(key)
+            if hasattr(val, "filename"):
+                logger.info("  field=%s filename=%s content_type=%s", key, val.filename, val.content_type)
+            else:
+                logger.info("  field=%s value=%r", key, val)
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, card.upload_handler, form, instance_id)
     except ValueError as e:
+        logger.warning("upload: validation error: %s", e)
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
+        logger.error("upload: unexpected error:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
     return result
@@ -423,7 +438,7 @@ async def respond_to_result(body: dict, request: Request):
         raise HTTPException(status_code=422, detail="action must be 'accept', 'reject', or 'renegotiate'")
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         updated = await loop.run_in_executor(
             None,
             card.respond_handler,
@@ -436,8 +451,34 @@ async def respond_to_result(body: dict, request: Request):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    # If deal just became authorized, index the CSV bytes under the release token.
+    # Note: _dataset_id is stripped by guardrails, so look it up from _submissions instead.
+    if updated.get("settlement_status") == "authorized" and updated.get("release_token"):
+        sub_record = _submissions.get(instance_id, {}).get(submission_id, {})
+        dataset_id = sub_record.get("dataset_id")
+        if dataset_id:
+            store_authorized_download(updated["release_token"], dataset_id)
+
     _results[instance_id][submission_id] = updated
     return {"settlement_status": updated.get("settlement_status")}
+
+
+@router.get("/download/{token}")
+async def download_dataset(token: str):
+    """
+    Download the authorized dataset CSV using the release token.
+    The token itself is the bearer credential — no X-Instance-Token needed.
+    Only issued after both parties accept the deal (settlement_status='authorized').
+    """
+    try:
+        csv_bytes = get_download_bytes(token)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Invalid or expired download token")
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=\"dataset_{token[:8]}.csv\""},
+    )
 
 
 @router.post("/trigger")

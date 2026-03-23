@@ -184,6 +184,7 @@ export interface BackendProcurementResult {
   submission_id: string
   deal: boolean
   quality_score?: number           // buyer-only; absent in supplier view
+  component_scores?: Record<string, number>  // buyer-only; per-dimension scores
   proposed_payment: number
   hard_constraints_pass?: boolean  // buyer-only; absent in supplier view
   settlement_status: "rejected" | "pending_approval" | "awaiting_counterparty" | "renegotiating" | "authorized"
@@ -195,6 +196,8 @@ export interface BackendProcurementResult {
   buyer_response?: "accept" | "reject" | "renegotiate" | null
   supplier_response?: "accept" | "reject" | "renegotiate" | null
   renegotiation_used: boolean
+  revised_budget?: number | null
+  revised_reserve?: number | null
 }
 
 export interface ProcurementResult {

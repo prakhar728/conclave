@@ -37,6 +37,7 @@ from skills.confidential_data_procurement.config import (
 # In-memory dataset store
 # dataset_id -> {
 #   "df": pd.DataFrame,
+#   "csv_bytes": bytes,        # raw upload bytes — kept for post-deal download
 #   "metadata": dict,          # seller-provided metadata
 #   "column_definitions": dict, # col_name -> human description
 #   "seller_claims": dict,      # claim_key -> claim_value
@@ -44,6 +45,11 @@ from skills.confidential_data_procurement.config import (
 # }
 # ---------------------------------------------------------------------------
 _datasets: dict[str, dict[str, Any]] = {}
+
+# release_token -> csv_bytes
+# Populated by store_authorized_download() when a deal is authorized.
+# Persists after cleanup() so the buyer can download post-settlement.
+_authorized_downloads: dict[str, bytes] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +66,27 @@ def get_dataset(dataset_id: str) -> dict[str, Any]:
 def cleanup(dataset_id: str) -> None:
     """Discard the DataFrame after the pipeline completes."""
     _datasets.pop(dataset_id, None)
+
+
+def store_authorized_download(release_token: str, dataset_id: str) -> None:
+    """
+    Move CSV bytes from the dataset store into the authorized downloads map.
+    Called when a deal reaches settlement_status='authorized'.
+    The bytes persist here after the DataFrame is cleaned up.
+    """
+    dataset = _datasets.get(dataset_id)
+    if dataset and "csv_bytes" in dataset:
+        _authorized_downloads[release_token] = dataset["csv_bytes"]
+
+
+def get_download_bytes(release_token: str) -> bytes:
+    """
+    Return the CSV bytes for an authorized download token.
+    Raises KeyError if the token is not found.
+    """
+    if release_token not in _authorized_downloads:
+        raise KeyError(f"Download token not found or not yet authorized.")
+    return _authorized_downloads[release_token]
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +223,7 @@ def procurement_upload_handler(form: Any, instance_id: str) -> dict[str, Any]:
     if csv_upload is None:
         raise ValueError("csv_file is required")
 
-    csv_bytes = csv_upload.file.read() if hasattr(csv_upload, "file") else bytes(csv_upload)
+    csv_bytes: bytes = csv_upload.file.read() if hasattr(csv_upload, "file") else bytes(csv_upload)
     df = parse_csv(csv_bytes)
 
     # --- Extract metadata (optional) ---
@@ -215,6 +242,7 @@ def procurement_upload_handler(form: Any, instance_id: str) -> dict[str, Any]:
     dataset_id = str(uuid.uuid4())
     _datasets[dataset_id] = {
         "df": df,
+        "csv_bytes": csv_bytes,
         "metadata": metadata,
         "column_definitions": metadata.get("column_definitions", {}),
         "seller_claims": metadata.get("seller_claims", {}),

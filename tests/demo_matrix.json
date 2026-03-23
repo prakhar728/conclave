@@ -4,14 +4,14 @@
   "model": "deepseek-ai/DeepSeek-V3.1",
   "pipeline": "deterministic \u2192 LLM agent (schema match + claim verify) \u2192 guardrails",
   "note": "base_price=0: bad data \u2192 payment approaches $0. Reserve not met \u2192 deal rejected.",
-  "buyer_prompt": "We are building a machine learning pipeline for real-time fraud detection in payment processing. We need a labeled transaction dataset with four specific columns: transaction_id (a unique identifier per transaction), amount (the transaction value in USD), is_fraud (a binary label \u2014 1 for fraudulent, 0 for legitimate), and category (merchant category code). The dataset must contain at least 500 rows. We can tolerate at most 5% missing values and at most 10% duplicate rows. No personally identifiable information should appear \u2014 date of birth, credit card numbers, social security numbers, or any customer names and addresses are strictly not acceptable. This data will train a gradient boosting classifier so label accuracy and field completeness are critical. Our maximum budget for a perfect dataset is $800. We have no floor price \u2014 if the data is unusable we expect to pay nothing.",
+  "buyer_prompt": "We are building a machine learning pipeline for real-time fraud detection in payment processing. We need a labeled transaction dataset with four specific columns: transaction_id (a unique identifier per transaction), amount (the transaction value in USD), is_fraud (a binary label \u2014 1 for fraudulent, 0 for legitimate), and category (merchant category code). The dataset must contain at least 500 rows. We can tolerate at most 5% missing values and at most 10% duplicate rows. No personally identifiable information should appear \u2014 date of birth, credit card numbers, social security numbers, or any customer names and addresses are strictly not acceptable. This data will train a gradient boosting classifier so label accuracy and field completeness are critical. Our maximum budget for a perfect dataset is $400. We have no floor price \u2014 if the data is unusable we expect to pay nothing.",
   "evaluation_matrix": [
     {
       "id": 1,
       "scenario": "Full Satisfaction",
       "narrative": "Buyer described exact requirements in natural language \u2014 LLM extracted the policy. Seller uploaded clean real transaction data (HuggingFace) with all four required columns. Agent verified claims and found no schema gaps. Both parties accepted the enclave's offer.",
       "seller_variant": "clean",
-      "buyer_variant": "standard ($800)",
+      "buyer_variant": "standard ($400)",
       "seller_input": {
         "column_definitions": {
           "transaction_id": "Unique identifier per transaction",
@@ -26,7 +26,7 @@
       },
       "reserve_price": 150.0,
       "quality_score": 1.0,
-      "proposed_payment": 800.0,
+      "proposed_payment": 400.0,
       "deal": true,
       "settlement_status": "pending_approval",
       "notes": [],
@@ -47,7 +47,7 @@
       "scenario": "Partial Satisfaction",
       "narrative": "Seller omitted the 'category' column, which the buyer explicitly required. Agent identified the schema gap and noted it in the explanation. Quality score and payment reflect the LLM's assessment of the partial dataset.",
       "seller_variant": "partial (missing category)",
-      "buyer_variant": "standard ($800)",
+      "buyer_variant": "standard ($400)",
       "seller_input": {
         "column_definitions": {
           "transaction_id": "Unique identifier per transaction",
@@ -60,7 +60,7 @@
       },
       "reserve_price": 50.0,
       "quality_score": 1.0,
-      "proposed_payment": 800.0,
+      "proposed_payment": 400.0,
       "deal": true,
       "settlement_status": "pending_approval",
       "notes": [],
@@ -80,7 +80,7 @@
       "scenario": "Critical: >50% Duplicates",
       "narrative": "Seller submitted a dataset where every row is duplicated \u2014 over 50% dup rate. The deterministic layer flags this as a critical violation and rejects immediately. No LLM call. Payment = $0. Seller's reserve price is irrelevant.",
       "seller_variant": "duplicated (>50%)",
-      "buyer_variant": "standard ($800)",
+      "buyer_variant": "standard ($400)",
       "seller_input": {
         "column_definitions": {
           "transaction_id": "Unique identifier per transaction",

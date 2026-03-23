@@ -5,6 +5,7 @@ import { use } from "react"
 import {
   Lock,
   Check,
+  X,
   GithubLogo,
   FilePdf,
   ArrowRight,
@@ -54,6 +55,7 @@ function ParticipantContent({ id }: { id: string }) {
   const [instanceMissing, setInstanceMissing] = React.useState(false)
   const [isProcurement, setIsProcurement] = React.useState(false)
   const [toast, setToast] = React.useState<string | null>(null)
+  const [userIdentity, setUserIdentity] = React.useState<string | null>(null)
 
   function showToast(msg: string) {
     setToast(msg)
@@ -143,6 +145,17 @@ function ParticipantContent({ id }: { id: string }) {
         const access_token = data.session?.access_token
         if (!access_token) return
         setAuthLoading(true)
+        const user = data.session?.user
+        if (user) {
+          const provider = user.app_metadata?.provider ?? "email"
+          if (provider === "github") {
+            setUserIdentity(`GitHub: ${user.user_metadata?.user_name ?? user.email}`)
+          } else if (provider === "google") {
+            setUserIdentity(`Google: ${user.email}`)
+          } else {
+            setUserIdentity(user.email ?? null)
+          }
+        }
         try {
           const { user_token } = await api.verifyToken(access_token, id)
           saveToken(user_token)
@@ -182,6 +195,7 @@ function ParticipantContent({ id }: { id: string }) {
     try {
       const { user_token } = await api.verifyOtp(email.trim(), otpCode.trim(), id)
       saveToken(user_token)
+      setUserIdentity(email.trim())
       setPageState("attest")
     } catch {
       setAuthError("Invalid or expired OTP. Try again.")
@@ -206,12 +220,13 @@ function ParticipantContent({ id }: { id: string }) {
   const [datasetName, setDatasetName] = React.useState("")
   const [datasetReference, setDatasetReference] = React.useState("")
   const [datasetFile, setDatasetFile] = React.useState<File | null>(null)
+  const [metadataFile, setMetadataFile] = React.useState<File | null>(null)
   const [reservePrice, setReservePrice] = React.useState("")
   const [sellerClaims, setSellerClaims] = React.useState<SellerClaim[]>([])
   const [sellerNote, setSellerNote] = React.useState("")
   const [procResult, setProcResult] = React.useState<ProcurementResult | null>(null)
 
-  // Procurement polling
+  // Procurement polling — pending_evaluation: wait for first result
   React.useEffect(() => {
     if (pageState !== "pending_evaluation" || !userToken || !submissionId) return
     const interval = setInterval(async () => {
@@ -224,6 +239,29 @@ function ParticipantContent({ id }: { id: string }) {
         // Not ready yet
       }
     }, 8000)
+    return () => clearInterval(interval)
+  }, [pageState, userToken, submissionId])
+
+  // Procurement polling — evaluation_complete / awaiting_negotiation: refresh negotiation state
+  React.useEffect(() => {
+    if (
+      (pageState !== "evaluation_complete" && pageState !== "awaiting_negotiation") ||
+      !userToken || !submissionId
+    ) return
+    const interval = setInterval(async () => {
+      try {
+        const r = await api.getProcurementResult(userToken, submissionId)
+        setProcResult(r)
+        // Advance page state only on authorization (rejection is shown inline)
+        if (r.settlement.state === "authorized") setPageState("released")
+        else if (r.negotiation.state === "requested_by_buyer" && pageState !== "evaluation_complete") {
+          // Buyer responded — bring seller back to evaluation_complete to show action buttons
+          setPageState("evaluation_complete")
+        }
+      } catch {
+        // Ignore transient errors
+      }
+    }, 5000)
     return () => clearInterval(interval)
   }, [pageState, userToken, submissionId])
 
@@ -284,6 +322,7 @@ function ParticipantContent({ id }: { id: string }) {
           note: sellerNote || undefined,
         },
         datasetFile,
+        metadataFile,
       )
       setSubmissionId(res.submission_id)
       setPageState("pending_evaluation")
@@ -377,10 +416,13 @@ function ParticipantContent({ id }: { id: string }) {
       )}
 
       {pageState !== "login" && (
-        <div className="border-b border-[#e8e8ed] px-6 py-3 flex justify-end max-w-[680px] mx-auto">
+        <div className="border-b border-[#e8e8ed] px-6 py-3 flex items-center justify-end gap-3 max-w-[680px] mx-auto">
+          {userIdentity && (
+            <span className="text-xs text-[#aeaeb2] truncate max-w-[200px]">{userIdentity}</span>
+          )}
           <button
             onClick={handleLogout}
-            className="text-sm text-[#6e6e73] hover:text-[#1d1d1f] transition-colors"
+            className="text-sm text-[#6e6e73] hover:text-[#1d1d1f] transition-colors shrink-0"
           >
             Log out
           </button>
@@ -654,6 +696,8 @@ function ParticipantContent({ id }: { id: string }) {
               onNoteChange={setSellerNote}
               file={datasetFile}
               onFileChange={setDatasetFile}
+              metadataFile={metadataFile}
+              onMetadataFileChange={setMetadataFile}
             />
             <button
               onClick={handleDatasetSubmit}
@@ -766,14 +810,47 @@ function ParticipantContent({ id }: { id: string }) {
                 </div>
               </div>
             )}
-            <NegotiationPanel
-              negotiation={procResult.negotiation}
-              role="seller"
-              reservePrice={parseFloat(reservePrice.replace(/,/g, "")) || undefined}
-              onAccept={handleAccept}
-              onReject={handleReject}
-              onRenegotiate={handleRenegotiate}
-            />
+            {procResult.negotiation.state === "rejected" &&
+            !procResult.negotiation.used &&
+            procResult.settlement.state === "failed" ? (
+              /* Enclave auto-rejection — show inline, no buttons */
+              <div className="rounded-2xl border border-red-100 bg-red-50 p-6">
+                <div className="flex items-center gap-2.5 mb-3">
+                  <X weight="bold" className="size-5 text-red-500" />
+                  <p className="text-sm font-semibold text-red-500">Deal not possible</p>
+                </div>
+                <p className="text-sm text-[#6e6e73]">
+                  The enclave's proposed payment of{" "}
+                  <span className="font-semibold text-[#1d1d1f]">
+                    ${procResult.proposed_payment.toLocaleString()}
+                  </span>{" "}
+                  {reservePrice
+                    ? <>is below your reserve price of{" "}
+                        <span className="font-semibold text-[#1d1d1f]">
+                          ${parseFloat(reservePrice.replace(/,/g, "")).toLocaleString()}
+                        </span>.</>
+                    : "did not meet your reserve price."}
+                  {" "}No data was shared outside the enclave.
+                </p>
+                {procResult.notes.length > 0 && (
+                  <ul className="mt-3 space-y-1">
+                    {procResult.notes.map((n, i) => (
+                      <li key={i} className="text-xs text-red-400">{n}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : (
+              <NegotiationPanel
+                negotiation={procResult.negotiation}
+                role="seller"
+                reservePrice={parseFloat(reservePrice.replace(/,/g, "")) || undefined}
+                proposedPayment={procResult.proposed_payment}
+                onAccept={handleAccept}
+                onReject={handleReject}
+                onRenegotiate={handleRenegotiate}
+              />
+            )}
             {procResult.enclave_signature && (
               <EnclaveSigBadge
                 signature={procResult.enclave_signature}
@@ -813,7 +890,6 @@ function ParticipantContent({ id }: { id: string }) {
               <p className="text-xs text-[#6e6e73] mb-1">Settlement amount</p>
               <p className="text-3xl font-bold text-[#1d1d1f]">${procResult.proposed_payment.toLocaleString()}</p>
             </div>
-            <ReleaseTokenCard token={procResult.release_token} />
           </div>
         )}
 

@@ -10,6 +10,7 @@ interface NegotiationPanelProps {
   role: "buyer" | "seller"
   maxBudget?: number
   reservePrice?: number
+  proposedPayment?: number
   onAccept: () => void
   onReject: () => void
   onRenegotiate: (revisedValue: number) => void
@@ -21,6 +22,7 @@ export function NegotiationPanel({
   role,
   maxBudget,
   reservePrice,
+  proposedPayment,
   onAccept,
   onReject,
   onRenegotiate,
@@ -32,7 +34,20 @@ export function NegotiationPanel({
 
   const { state, used } = negotiation
   const isTerminal = ["accepted", "rejected"].includes(state)
-  const isWaiting = ["awaiting_counterparty", "renegotiation_submitted"].includes(state)
+
+  // Is it this party's turn to respond?
+  const myTurn =
+    (role === "seller" && state === "requested_by_buyer") ||
+    (role === "buyer" && state === "requested_by_seller")
+
+  // Did this party already respond and the other hasn't yet?
+  const iWaiting =
+    (role === "buyer" && state === "requested_by_buyer") ||
+    (role === "seller" && state === "requested_by_seller") ||
+    state === "awaiting_counterparty" ||
+    state === "renegotiation_submitted"
+
+  const showActionButtons = (state === "none" || myTurn) && !isTerminal && !iWaiting && !showRenegotiateForm
 
   function handleRenegotiateClick() {
     if (used) return
@@ -70,15 +85,58 @@ export function NegotiationPanel({
         </div>
       )}
 
+      {/* Counterparty responded — this party needs to act */}
+      {myTurn && !showRenegotiateForm && (
+        <div className="rounded-xl bg-[#fff9ec] border border-[#ff9f0a]/20 px-4 py-3 mb-3 text-sm space-y-1">
+          {role === "seller" ? (
+            <>
+              {negotiation.revised_budget != null && (
+                <p className="text-[#1d1d1f]">
+                  Buyer's revised offer:{" "}
+                  <span className="font-semibold">${negotiation.revised_budget.toLocaleString()}</span>
+                </p>
+              )}
+              {proposedPayment != null && (
+                <p className="text-[#6e6e73]">
+                  If you <span className="font-medium text-[#1d1d1f]">accept</span>, you receive the original evaluated amount:{" "}
+                  <span className="font-semibold text-[#1d1d1f]">${proposedPayment.toLocaleString()}</span>
+                </p>
+              )}
+              {negotiation.revised_budget != null && (
+                <p className="text-[#6e6e73]">
+                  If you <span className="font-medium text-[#1d1d1f]">renegotiate</span>, your revised reserve will be compared against the buyer's{" "}
+                  <span className="font-semibold text-[#1d1d1f]">${negotiation.revised_budget.toLocaleString()}</span>.
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              {negotiation.revised_reserve != null && (
+                <p className="text-[#1d1d1f]">
+                  Seller's revised reserve:{" "}
+                  <span className="font-semibold">${negotiation.revised_reserve.toLocaleString()}</span>
+                </p>
+              )}
+              {proposedPayment != null && (
+                <p className="text-[#6e6e73]">
+                  If you <span className="font-medium text-[#1d1d1f]">accept</span>, you pay the original evaluated amount:{" "}
+                  <span className="font-semibold text-[#1d1d1f]">${proposedPayment.toLocaleString()}</span>
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {/* Waiting for counterparty */}
-      {isWaiting && (
+      {iWaiting && (
         <p className="text-sm text-[#6e6e73]">
           Waiting for {role === "buyer" ? "seller" : "buyer"} to respond…
         </p>
       )}
 
-      {/* Initial action buttons */}
-      {state === "none" && !isTerminal && !isWaiting && !showRenegotiateForm && (
+      {/* Action buttons — initial response or counter-response */}
+      {showActionButtons && (
         <div className="flex gap-2">
           <button
             onClick={onAccept}

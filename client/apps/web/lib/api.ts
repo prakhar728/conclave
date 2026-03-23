@@ -233,8 +233,28 @@ function adaptBackendResult(raw: BackendProcurementResult): ProcurementResult {
         ]
       : []
 
-  // Milestones: backend doesn't expose per-milestone breakdown in the result
-  const milestones: MilestoneScore[] = []
+  // Milestones: map component_scores from backend (buyer-only field)
+  const COMPONENT_LABELS: Record<string, string> = {
+    schema:         "Schema match",
+    coverage:       "Row coverage",
+    null:           "Null rate",
+    duplicate:      "Duplicate rate",
+    label:          "Label balance",
+    risk:           "Risk / forbidden cols",
+    claim_veracity: "Claim veracity",
+  }
+  const COMPONENT_WEIGHTS: Record<string, number> = {
+    schema: 0.15, coverage: 0.15, null: 0.20,
+    duplicate: 0.15, label: 0.10, risk: 0.15, claim_veracity: 0.10,
+  }
+  const milestones: MilestoneScore[] = raw.component_scores
+    ? Object.entries(raw.component_scores).map(([key, score]) => ({
+        name: COMPONENT_LABELS[key] ?? key,
+        weight: COMPONENT_WEIGHTS[key] ?? 0,
+        score,
+        passed: score >= 0.5,
+      }))
+    : []
 
   // Claim results: map from claim_verification dict (agent layer)
   const claim_results: Record<string, boolean> = {}
@@ -250,19 +270,28 @@ function adaptBackendResult(raw: BackendProcurementResult): ProcurementResult {
   let negState: NegotiationState = "none"
   if (settlement_status === "authorized") {
     negState = "accepted"
-  } else if (settlement_status === "rejected" && (buyer_response || supplier_response)) {
+  } else if (settlement_status === "rejected") {
+    // Covers both enclave auto-rejection (no responses) and user-initiated rejection
     negState = "rejected"
   } else if (settlement_status === "awaiting_counterparty") {
-    negState = "awaiting_counterparty"
-  } else if (buyer_response === "renegotiate" && !supplier_response) {
-    negState = "requested_by_buyer"
-  } else if (supplier_response === "renegotiate" && !buyer_response) {
-    negState = "requested_by_seller"
+    // One party responded, the other hasn't — identify who needs to act next
+    if (buyer_response && !supplier_response) {
+      negState = "requested_by_buyer"   // buyer went; seller's turn
+    } else if (supplier_response && !buyer_response) {
+      negState = "requested_by_seller"  // seller went; buyer's turn
+    } else {
+      negState = "awaiting_counterparty"
+    }
   } else if (renegotiation_used) {
     negState = "renegotiation_submitted"
   }
 
-  const negotiation: NegotiationStatus = { state: negState, used: renegotiation_used }
+  const negotiation: NegotiationStatus = {
+    state: negState,
+    used: renegotiation_used,
+    revised_budget: raw.revised_budget ?? undefined,
+    revised_reserve: raw.revised_reserve ?? undefined,
+  }
 
   // Settlement state
   let settlState: SettlementState = "none"
@@ -458,11 +487,32 @@ export const api = {
     token: string,
     submission: SupplierSubmission,
     file?: File,
+    metadataFile?: File | null,
   ): Promise<SubmitResponse> => {
-    // Step 1: upload the CSV file (required)
+    // Step 1: upload the CSV file + metadata JSON
     if (!file) throw new ApiError(422, "A CSV file is required for dataset submission")
     const form = new FormData()
     form.append("csv_file", file)
+
+    if (metadataFile) {
+      // Use the file the seller uploaded directly
+      form.append("metadata_file", metadataFile, metadataFile.name)
+    } else {
+      // Fall back: build metadata.json from the form fields
+      const sellerClaimsObj: Record<string, string | number> = {}
+      for (const c of submission.seller_claims ?? []) {
+        sellerClaimsObj[c.name] = c.value
+      }
+      const metadataPayload: Record<string, unknown> = { seller_claims: sellerClaimsObj }
+      if (submission.note) metadataPayload.note = submission.note
+      if (submission.dataset_reference) metadataPayload.dataset_reference = submission.dataset_reference
+      form.append(
+        "metadata_file",
+        new Blob([JSON.stringify(metadataPayload)], { type: "application/json" }),
+        "metadata.json",
+      )
+    }
+
     const { dataset_id } = await postForm<{ dataset_id: string }>("/upload", form, token)
 
     // Step 2: submit with the returned dataset_id

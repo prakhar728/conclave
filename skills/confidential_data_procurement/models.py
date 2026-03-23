@@ -106,6 +106,7 @@ class ProcurementResult(BaseModel):
         "renegotiating",
         "authorized",
     ] = "rejected"
+    component_scores: dict[str, float] = {}       # buyer-only: per-dimension scores
     release_token: Optional[str] = None
     notes: list[str] = []                         # failure/partial notes — same for both roles
     explanation: Optional[str] = None             # bounded LLM summary

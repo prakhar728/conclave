@@ -17,6 +17,8 @@ interface DatasetUploadCardProps {
   onNoteChange: (v: string) => void
   file?: File | null
   onFileChange: (f: File | null) => void
+  metadataFile?: File | null
+  onMetadataFileChange: (f: File | null) => void
 }
 
 export function DatasetUploadCard({
@@ -32,10 +34,13 @@ export function DatasetUploadCard({
   onNoteChange,
   file,
   onFileChange,
+  metadataFile,
+  onMetadataFileChange,
 }: DatasetUploadCardProps) {
   const [newClaimName, setNewClaimName] = React.useState("")
   const [newClaimValue, setNewClaimValue] = React.useState("")
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const metadataInputRef = React.useRef<HTMLInputElement>(null)
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] ?? null
@@ -50,6 +55,17 @@ export function DatasetUploadCard({
     e.preventDefault()
     const f = e.dataTransfer.files?.[0] ?? null
     if (f) onFileChange(f)
+  }
+
+  function handleMetadataSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] ?? null
+    onMetadataFileChange(f)
+  }
+
+  function handleMetadataDrop(e: React.DragEvent) {
+    e.preventDefault()
+    const f = e.dataTransfer.files?.[0] ?? null
+    if (f) onMetadataFileChange(f)
   }
 
   function addClaim() {
@@ -124,6 +140,42 @@ export function DatasetUploadCard({
           placeholder="s3://bucket/dataset.parquet or IPFS hash"
           className="w-full rounded-xl border border-[#d2d2d7] bg-white px-4 py-2.5 text-sm font-mono text-[#1d1d1f] placeholder:text-[#aeaeb2] focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
         />
+      </div>
+
+      {/* Metadata JSON upload */}
+      <div>
+        <label className="text-sm font-medium text-[#1d1d1f] mb-1 block">
+          Metadata <span className="text-[#aeaeb2] font-normal">(optional)</span>
+        </label>
+        <p className="text-xs text-[#aeaeb2] mb-2">
+          JSON file with <code className="font-mono">seller_claims</code> and <code className="font-mono">column_definitions</code> the enclave will verify.
+        </p>
+        <input
+          ref={metadataInputRef}
+          type="file"
+          accept=".json"
+          className="hidden"
+          onChange={handleMetadataSelect}
+        />
+        <div
+          onClick={() => metadataInputRef.current?.click()}
+          onDrop={handleMetadataDrop}
+          onDragOver={(e) => e.preventDefault()}
+          className="rounded-xl border border-dashed border-[#d2d2d7] bg-[#f5f5f7] px-4 py-5 text-center hover:border-primary/30 transition-colors cursor-pointer"
+        >
+          {metadataFile ? (
+            <>
+              <CheckCircle weight="fill" className="size-6 text-success mx-auto mb-1.5" />
+              <p className="text-sm font-medium text-[#1d1d1f]">{metadataFile.name}</p>
+              <p className="text-xs text-[#aeaeb2] mt-1">{(metadataFile.size / 1024).toFixed(1)} KB — click to replace</p>
+            </>
+          ) : (
+            <>
+              <UploadSimple className="size-6 text-[#aeaeb2] mx-auto mb-1.5" />
+              <p className="text-sm text-[#6e6e73]">Drag & drop metadata.json or click to upload</p>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Reserve price */}
