@@ -21,7 +21,7 @@ export function FeaturesSectionWithHoverEffects() {
     {
       title: "Zero-Knowledge Outputs",
       description:
-        "Only scores, percentiles, and cluster labels exit the enclave. Raw content never leaves.",
+        "Only novelty scores and alignment flags exit the enclave. Raw content never leaves.",
       icon: <IconEaseInOut />,
     },
     {

@@ -15,8 +15,7 @@ from __future__ import annotations
 import json
 import re
 
-from langchain_core.messages import SystemMessage, HumanMessage
-from langgraph.prebuilt import ToolNode
+from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 
 from config import get_llm
 from skills.hackathon_novelty.models import HackathonSubmission
@@ -77,9 +76,11 @@ def run_ingest(submissions: list[HackathonSubmission]) -> dict[str, str]:
         messages.append(response)
         if not (hasattr(response, "tool_calls") and response.tool_calls):
             break
-        tool_node = ToolNode(INGEST_TOOLS)
-        tool_results = tool_node.invoke({"messages": messages})
-        messages.extend(tool_results["messages"])
+        tool_map = {t.name: t for t in INGEST_TOOLS}
+        for tool_call in response.tool_calls:
+            fn = tool_map.get(tool_call["name"])
+            result = fn.invoke(tool_call["args"]) if fn else {"error": f"Unknown tool: {tool_call['name']}"}
+            messages.append(ToolMessage(content=str(result), tool_call_id=tool_call["id"]))
         iteration += 1
 
     if response is None:

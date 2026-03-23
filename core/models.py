@@ -1,5 +1,6 @@
 from __future__ import annotations
-from pydantic import BaseModel
+import uuid
+from pydantic import BaseModel, Field
 from typing import Optional
 
 
@@ -8,7 +9,7 @@ class Submission(BaseModel):
     Skills define their own subclass (e.g. HackathonSubmission) to add
     the fields they actually need.
     """
-    submission_id: str
+    submission_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     metadata: Optional[dict] = None
 
 

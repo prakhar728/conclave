@@ -164,7 +164,7 @@ function Explainer() {
             {
               icon: <ChartBar weight="fill" className="size-6" />,
               title: "Only scores and metrics exit",
-              desc: "Novelty scores, percentiles, cluster labels. The raw content never leaves.",
+              desc: "Novelty scores and alignment flags. The raw content never leaves.",
             },
           ].map(({ icon, title, desc }) => (
             <div key={title} className="rounded-2xl bg-white p-6 text-left hover-lift">
@@ -311,7 +311,7 @@ function HowItWorks() {
     {
       n: "04",
       title: "Only outputs exit",
-      desc: "Scores, percentiles, cluster labels. The raw content never leaves the enclave.",
+      desc: "Novelty scores and alignment flags. The raw content never leaves the enclave.",
     },
     {
       n: "05",

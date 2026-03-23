@@ -31,10 +31,9 @@ import operator
 import re
 from typing import TypedDict, Annotated, Optional
 
-from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
+from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode
 
 from config import get_llm
 from skills.hackathon_novelty.tools import TRIAGE_TOOLS, SCORE_TOOLS
@@ -175,9 +174,11 @@ def triage_node(state: AgentState) -> dict:
         if not (hasattr(response, "tool_calls") and response.tool_calls):
             break
         # Execute tool calls
-        tool_node = ToolNode(TRIAGE_TOOLS)
-        tool_results = tool_node.invoke({"messages": messages})
-        messages.extend(tool_results["messages"])
+        tool_map = {t.name: t for t in TRIAGE_TOOLS}
+        for tool_call in response.tool_calls:
+            fn = tool_map.get(tool_call["name"])
+            result = fn.invoke(tool_call["args"]) if fn else {"error": f"Unknown tool: {tool_call['name']}"}
+            messages.append(ToolMessage(content=str(result), tool_call_id=tool_call["id"]))
         iteration += 1
 
     # Parse classifications + aligned judgments from final response
@@ -275,9 +276,11 @@ def score_node(state: AgentState) -> dict:
         messages.append(response)
         if not (hasattr(response, "tool_calls") and response.tool_calls):
             break
-        tool_node = ToolNode(SCORE_TOOLS)
-        tool_results = tool_node.invoke({"messages": messages})
-        messages.extend(tool_results["messages"])
+        tool_map = {t.name: t for t in SCORE_TOOLS}
+        for tool_call in response.tool_calls:
+            fn = tool_map.get(tool_call["name"])
+            result = fn.invoke(tool_call["args"]) if fn else {"error": f"Unknown tool: {tool_call['name']}"}
+            messages.append(ToolMessage(content=str(result), tool_call_id=tool_call["id"]))
         iteration += 1
 
     # If the model stopped without outputting scores (empty content after tool calls),

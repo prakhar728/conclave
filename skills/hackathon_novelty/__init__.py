@@ -180,12 +180,8 @@ skill_card = SkillCard(
     ),
     init_handler=hackathon_init_handler,
     user_display={
-        "novelty_score":   {"type": "gauge",       "label": "Novelty",            "min": 0, "max": 1},
-        "percentile":      {"type": "percentile",  "label": "Percentile"},
-        "cluster":         {"type": "badge",       "label": "Cluster"},
-        "status":          {"type": "badge",       "label": "Status"},
-        "analysis_depth":  {"type": "badge",       "label": "Depth"},
-        "duplicate_of":    {"type": "text",        "label": "Duplicate Of"},
+        "novelty_score":   {"type": "gauge",       "label": "Novelty",   "min": 0, "max": 1},
+        "aligned":         {"type": "badge",       "label": "Aligned"},
         "criteria_scores": {"type": "score_table", "label": "Criteria Breakdown"},
     },
 )
