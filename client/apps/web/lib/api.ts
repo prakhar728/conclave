@@ -1,12 +1,19 @@
 import type {
   AttestationResponse,
+  BackendProcurementResult,
+  DatasetMetrics,
   DisplayMap,
+  HardConstraintResult,
   HealthResponse,
   InitRequest,
   InitResponse,
+  MilestoneScore,
+  NegotiationState,
+  NegotiationStatus,
   NoveltyResult,
   ProcurementResult,
   ReleaseToken,
+  SettlementState,
   SkillCard,
   SubmitResponse,
   SupplierSubmission,
@@ -196,6 +203,111 @@ async function get<T>(path: string, token?: string): Promise<T> {
   return res.json()
 }
 
+async function postForm<T>(path: string, form: FormData, token: string): Promise<T> {
+  const res = await fetch(`${TEE_URL}${path}`, {
+    method: "POST",
+    headers: { "X-Instance-Token": token },
+    body: form,
+  })
+  if (!res.ok) throw new ApiError(res.status, `${path} failed: ${res.status}`)
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Backend → frontend result adapter
+// ---------------------------------------------------------------------------
+
+function adaptBackendResult(raw: BackendProcurementResult): ProcurementResult {
+  // Hard constraints: backend gives a single bool; build a minimal array
+  const hard_constraints: HardConstraintResult[] =
+    raw.hard_constraints_pass !== undefined
+      ? [
+          {
+            name: "Hard constraints",
+            passed: raw.hard_constraints_pass,
+            detail:
+              !raw.hard_constraints_pass && raw.notes.length > 0
+                ? raw.notes.join("; ")
+                : undefined,
+          },
+        ]
+      : []
+
+  // Milestones: backend doesn't expose per-milestone breakdown in the result
+  const milestones: MilestoneScore[] = []
+
+  // Claim results: map from claim_verification dict (agent layer)
+  const claim_results: Record<string, boolean> = {}
+  const cv = raw.claim_verification
+  if (cv && typeof cv === "object") {
+    for (const [k, v] of Object.entries(cv)) {
+      claim_results[k] = typeof v === "boolean" ? v : Boolean(v)
+    }
+  }
+
+  // Negotiation state: derive from response fields + settlement_status
+  const { buyer_response, supplier_response, renegotiation_used, settlement_status } = raw
+  let negState: NegotiationState = "none"
+  if (settlement_status === "authorized") {
+    negState = "accepted"
+  } else if (settlement_status === "rejected" && (buyer_response || supplier_response)) {
+    negState = "rejected"
+  } else if (settlement_status === "awaiting_counterparty") {
+    negState = "awaiting_counterparty"
+  } else if (buyer_response === "renegotiate" && !supplier_response) {
+    negState = "requested_by_buyer"
+  } else if (supplier_response === "renegotiate" && !buyer_response) {
+    negState = "requested_by_seller"
+  } else if (renegotiation_used) {
+    negState = "renegotiation_submitted"
+  }
+
+  const negotiation: NegotiationStatus = { state: negState, used: renegotiation_used }
+
+  // Settlement state
+  let settlState: SettlementState = "none"
+  if (settlement_status === "authorized") settlState = "authorized"
+  else if (settlement_status === "rejected") settlState = "failed"
+  else if (
+    settlement_status === "pending_approval" ||
+    settlement_status === "awaiting_counterparty" ||
+    settlement_status === "renegotiating"
+  )
+    settlState = "pending"
+
+  // Release token: backend returns a plain string
+  let release_token: ReleaseToken | undefined
+  if (raw.release_token) {
+    release_token = { token: raw.release_token, issued_at: new Date().toISOString() }
+  }
+
+  // Dataset metrics: not exposed by backend; use empty stub
+  const dataset_metrics: DatasetMetrics = {
+    row_count: 0,
+    null_rate: 0,
+    duplicate_rate: 0,
+    column_count: 0,
+    columns_present: [],
+    columns_missing: [],
+  }
+
+  return {
+    submission_id: raw.submission_id,
+    hard_constraints,
+    milestones,
+    claim_results,
+    partial_score: raw.quality_score ?? 0,
+    proposed_payment: raw.proposed_payment,
+    negotiation,
+    settlement: {
+      state: settlState,
+      amount: settlState === "authorized" ? raw.proposed_payment : undefined,
+    },
+    release_token,
+    dataset_metrics,
+  }
+}
+
 export const api = {
   // --- Public ---
   checkInstance: async (instance_id: string): Promise<{ skill_name: string; triggered: boolean; submissions: number; threshold: number }> => {
@@ -342,64 +454,72 @@ export const api = {
   },
 
   // --- Procurement ---
-  submitDataset: async (token: string, submission: SupplierSubmission): Promise<SubmitResponse> => {
-    await delay(800)
-    return {
-      submission_id: `proc_${Math.random().toString(36).slice(2, 9)}`,
-      status: "received_pending",
-      submissions_count: 1,
-    }
+  submitDataset: async (
+    token: string,
+    submission: SupplierSubmission,
+    file?: File,
+  ): Promise<SubmitResponse> => {
+    // Step 1: upload the CSV file (required)
+    if (!file) throw new ApiError(422, "A CSV file is required for dataset submission")
+    const form = new FormData()
+    form.append("csv_file", file)
+    const { dataset_id } = await postForm<{ dataset_id: string }>("/upload", form, token)
+
+    // Step 2: submit with the returned dataset_id
+    const submission_id = `proc_${Math.random().toString(36).slice(2, 14)}`
+    return post(
+      "/submit",
+      {
+        submission_id,
+        dataset_id,
+        dataset_name: submission.dataset_name,
+        reserve_price: submission.reserve_price,
+      },
+      token,
+    )
   },
 
   getProcurementResult: async (
     token: string,
     submission_id: string,
   ): Promise<ProcurementResult> => {
-    await delay(400)
-    const r = MOCK_PROCUREMENT_RESULTS.find((r) => r.submission_id === submission_id)
-    return r ?? MOCK_PROCUREMENT_RESULTS[0]!
+    const raw = await get<BackendProcurementResult>(`/results/${submission_id}`, token)
+    return adaptBackendResult(raw)
   },
 
   getProcurementResults: async (token: string): Promise<{ results: ProcurementResult[] }> => {
-    await delay(400)
-    return { results: MOCK_PROCUREMENT_RESULTS }
+    const { results } = await get<{ results: BackendProcurementResult[] }>("/results", token)
+    return { results: results.map(adaptBackendResult) }
   },
 
-  acceptDeal: async (token: string, submission_id: string): Promise<{ status: string }> => {
-    await delay(300)
-    return { status: "accepted" }
+  acceptDeal: async (token: string, submission_id: string): Promise<{ settlement_status: string }> => {
+    return post("/respond", { submission_id, action: "accept" }, token)
   },
 
-  rejectDeal: async (token: string, submission_id: string): Promise<{ status: string }> => {
-    await delay(300)
-    return { status: "rejected" }
+  rejectDeal: async (token: string, submission_id: string): Promise<{ settlement_status: string }> => {
+    return post("/respond", { submission_id, action: "reject" }, token)
   },
 
   requestNegotiation: async (
     token: string,
     submission_id: string,
     revised_value: number,
-  ): Promise<{ status: string }> => {
-    await delay(300)
-    return { status: "negotiation_requested" }
+  ): Promise<{ settlement_status: string }> => {
+    return post("/respond", { submission_id, action: "renegotiate", revised_value }, token)
   },
 
   submitRenegotiation: async (
     token: string,
     submission_id: string,
     revised_value: number,
-  ): Promise<{ status: string }> => {
-    await delay(300)
-    return { status: "renegotiation_submitted" }
+  ): Promise<{ settlement_status: string }> => {
+    return post("/respond", { submission_id, action: "renegotiate", revised_value }, token)
   },
 
   getReleaseToken: async (token: string, submission_id: string): Promise<ReleaseToken> => {
-    await delay(300)
-    return {
-      token: `tok_${Math.random().toString(36).slice(2, 18)}`,
-      issued_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-    }
+    const raw = await get<BackendProcurementResult>(`/results/${submission_id}`, token)
+    if (!raw.release_token) throw new ApiError(404, "No release token available yet")
+    return { token: raw.release_token, issued_at: new Date().toISOString() }
   },
 }
 

@@ -44,7 +44,7 @@ function SetupContent() {
   })
   const [procurementPolicy, setProcurementPolicy] = React.useState<Partial<BuyerPolicy>>({})
 
-  const isProcurement = selectedSkill === "confidential_procurement"
+  const isProcurement = selectedSkill === "confidential_data_procurement"
 
   // Step 3 state
   const [result, setResult] = React.useState<InitResponse | null>(null)

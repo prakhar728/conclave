@@ -119,7 +119,7 @@ function ParticipantContent({ id }: { id: string }) {
 
   React.useEffect(() => {
     api.checkInstance(id).then((inst) => {
-      const proc = inst.skill_name === "confidential_procurement"
+      const proc = inst.skill_name === "confidential_data_procurement"
       setIsProcurement(proc)
       if (!proc && inst.skill_name) {
         api.getSkill(inst.skill_name).then((card) => {
@@ -133,7 +133,7 @@ function ParticipantContent({ id }: { id: string }) {
       setUserToken(cached)
       // Detect procurement before checking prior submissions
       api.checkInstance(id).then((inst) => {
-        const proc = inst.skill_name === "confidential_procurement"
+        const proc = inst.skill_name === "confidential_data_procurement"
         checkPriorSubmission(cached, proc)
       }).catch(() => {})
       return
@@ -147,7 +147,7 @@ function ParticipantContent({ id }: { id: string }) {
           const { user_token } = await api.verifyToken(access_token, id)
           saveToken(user_token)
           const inst = await api.checkInstance(id)
-          const proc = inst.skill_name === "confidential_procurement"
+          const proc = inst.skill_name === "confidential_data_procurement"
           await checkPriorSubmission(user_token, proc)
         } catch (err) {
           handleAuthError(err)
@@ -205,6 +205,7 @@ function ParticipantContent({ id }: { id: string }) {
   // Procurement seller state
   const [datasetName, setDatasetName] = React.useState("")
   const [datasetReference, setDatasetReference] = React.useState("")
+  const [datasetFile, setDatasetFile] = React.useState<File | null>(null)
   const [reservePrice, setReservePrice] = React.useState("")
   const [sellerClaims, setSellerClaims] = React.useState<SellerClaim[]>([])
   const [sellerNote, setSellerNote] = React.useState("")
@@ -269,41 +270,53 @@ function ParticipantContent({ id }: { id: string }) {
   }
 
   async function handleDatasetSubmit() {
-    if (!datasetName.trim() || !reservePrice || !userToken) return
+    if (!datasetName.trim() || !reservePrice || !userToken || !datasetFile) return
     setPageState("uploading")
-    const res = await api.submitDataset(userToken, {
-      dataset_name: datasetName,
-      dataset_reference: datasetReference || undefined,
-      seller_claims: sellerClaims,
-      metadata: {},
-      reserve_price: parseFloat(reservePrice.replace(/,/g, "")),
-      note: sellerNote || undefined,
-    })
-    setSubmissionId(res.submission_id)
-    setPageState("pending_evaluation")
+    try {
+      const res = await api.submitDataset(
+        userToken,
+        {
+          dataset_name: datasetName,
+          dataset_reference: datasetReference || undefined,
+          seller_claims: sellerClaims,
+          metadata: {},
+          reserve_price: parseFloat(reservePrice.replace(/,/g, "")),
+          note: sellerNote || undefined,
+        },
+        datasetFile,
+      )
+      setSubmissionId(res.submission_id)
+      setPageState("pending_evaluation")
+    } catch (err) {
+      handleAuthError(err)
+      if (!(err instanceof ApiError && err.status === 403)) {
+        showToast("Upload failed. Please check your file and try again.")
+        setPageState("form")
+      }
+    }
   }
 
   async function handleAccept() {
     if (!procResult || !userToken) return
     await api.acceptDeal(userToken, procResult.submission_id)
-    const token = await api.getReleaseToken(userToken, procResult.submission_id)
-    setProcResult((r) => r ? { ...r, release_token: token, negotiation: { ...r.negotiation, state: "accepted" }, settlement: { state: "authorized", amount: r.proposed_payment } } : r)
+    const updated = await api.getProcurementResult(userToken, procResult.submission_id)
+    setProcResult(updated)
     setPageState("released")
   }
 
   async function handleReject() {
     if (!procResult || !userToken) return
     await api.rejectDeal(userToken, procResult.submission_id)
-    setProcResult((r) => r ? { ...r, negotiation: { ...r.negotiation, state: "rejected" }, settlement: { state: "failed" } } : r)
+    const updated = await api.getProcurementResult(userToken, procResult.submission_id)
+    setProcResult(updated)
     setPageState("rejected")
   }
 
   async function handleRenegotiate(revisedValue: number) {
     if (!procResult || !userToken) return
     await api.submitRenegotiation(userToken, procResult.submission_id, revisedValue)
-    setProcResult((r) =>
-      r ? { ...r, negotiation: { state: "renegotiation_submitted", revised_reserve: revisedValue, used: true } } : r,
-    )
+    const updated = await api.getProcurementResult(userToken, procResult.submission_id)
+    setProcResult(updated)
     setPageState("awaiting_negotiation")
   }
 
@@ -320,7 +333,10 @@ function ParticipantContent({ id }: { id: string }) {
 
   const canHackathonSubmit = ideaText.trim().length > 20 && !submitting
   const canDatasetSubmit =
-    datasetName.trim().length > 0 && reservePrice.trim().length > 0 && pageState === "form"
+    datasetName.trim().length > 0 &&
+    reservePrice.trim().length > 0 &&
+    !!datasetFile &&
+    pageState === "form"
 
   if (instanceMissing) {
     return (
@@ -636,6 +652,8 @@ function ParticipantContent({ id }: { id: string }) {
               onClaimsChange={setSellerClaims}
               note={sellerNote}
               onNoteChange={setSellerNote}
+              file={datasetFile}
+              onFileChange={setDatasetFile}
             />
             <button
               onClick={handleDatasetSubmit}

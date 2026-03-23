@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { UploadSimple, Plus, X } from "@phosphor-icons/react"
+import { UploadSimple, Plus, X, CheckCircle } from "@phosphor-icons/react"
 import type { SellerClaim } from "@/lib/types"
 
 interface DatasetUploadCardProps {
@@ -15,6 +15,8 @@ interface DatasetUploadCardProps {
   onClaimsChange: (claims: SellerClaim[]) => void
   note: string
   onNoteChange: (v: string) => void
+  file?: File | null
+  onFileChange: (f: File | null) => void
 }
 
 export function DatasetUploadCard({
@@ -28,9 +30,27 @@ export function DatasetUploadCard({
   onClaimsChange,
   note,
   onNoteChange,
+  file,
+  onFileChange,
 }: DatasetUploadCardProps) {
   const [newClaimName, setNewClaimName] = React.useState("")
   const [newClaimValue, setNewClaimValue] = React.useState("")
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] ?? null
+    onFileChange(f)
+  }
+
+  function handleDropZoneClick() {
+    fileInputRef.current?.click()
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    const f = e.dataTransfer.files?.[0] ?? null
+    if (f) onFileChange(f)
+  }
 
   function addClaim() {
     if (!newClaimName.trim()) return
@@ -66,10 +86,32 @@ export function DatasetUploadCard({
       {/* Dataset upload or reference */}
       <div>
         <label className="text-sm font-medium text-[#1d1d1f] mb-2 block">Dataset</label>
-        <div className="rounded-xl border border-dashed border-[#d2d2d7] bg-[#f5f5f7] px-4 py-8 text-center hover:border-primary/30 transition-colors cursor-pointer mb-3">
-          <UploadSimple className="size-8 text-[#aeaeb2] mx-auto mb-2" />
-          <p className="text-sm text-[#6e6e73]">Drag & drop your dataset or click to upload</p>
-          <p className="text-xs text-[#aeaeb2] mt-1">CSV, Parquet, JSON — sent directly to the enclave over TLS</p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv"
+          className="hidden"
+          onChange={handleFileSelect}
+        />
+        <div
+          onClick={handleDropZoneClick}
+          onDrop={handleDrop}
+          onDragOver={(e) => e.preventDefault()}
+          className="rounded-xl border border-dashed border-[#d2d2d7] bg-[#f5f5f7] px-4 py-8 text-center hover:border-primary/30 transition-colors cursor-pointer mb-3"
+        >
+          {file ? (
+            <>
+              <CheckCircle weight="fill" className="size-8 text-success mx-auto mb-2" />
+              <p className="text-sm font-medium text-[#1d1d1f]">{file.name}</p>
+              <p className="text-xs text-[#aeaeb2] mt-1">{(file.size / 1024).toFixed(1)} KB — click to replace</p>
+            </>
+          ) : (
+            <>
+              <UploadSimple className="size-8 text-[#aeaeb2] mx-auto mb-2" />
+              <p className="text-sm text-[#6e6e73]">Drag & drop your CSV or click to upload</p>
+              <p className="text-xs text-[#aeaeb2] mt-1">CSV only — sent directly to the enclave over TLS</p>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-3 mb-3">
           <div className="flex-1 h-px bg-[#e8e8ed]" />

@@ -179,6 +179,24 @@ export interface ReleaseToken {
   expires_at?: string
 }
 
+// Raw shape returned by the backend before adaptation
+export interface BackendProcurementResult {
+  submission_id: string
+  deal: boolean
+  quality_score?: number           // buyer-only; absent in supplier view
+  proposed_payment: number
+  hard_constraints_pass?: boolean  // buyer-only; absent in supplier view
+  settlement_status: "rejected" | "pending_approval" | "awaiting_counterparty" | "renegotiating" | "authorized"
+  release_token: string | null
+  notes: string[]
+  explanation?: string | null
+  claim_verification?: Record<string, unknown> | null
+  schema_matching?: Record<string, unknown> | null
+  buyer_response?: "accept" | "reject" | "renegotiate" | null
+  supplier_response?: "accept" | "reject" | "renegotiate" | null
+  renegotiation_used: boolean
+}
+
 export interface ProcurementResult {
   submission_id: string
   hard_constraints: HardConstraintResult[]

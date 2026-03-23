@@ -63,7 +63,7 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
         setSubCount(inst.submissions)
         setThreshold(inst.threshold)
         if (inst.triggered) setTriggered(true)
-        const proc = inst.skill_name === "confidential_procurement"
+        const proc = inst.skill_name === "confidential_data_procurement"
         setIsProcurement(proc)
         if (!proc && inst.skill_name) {
           api.getSkill(inst.skill_name).then((card) => {
@@ -82,7 +82,7 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
   React.useEffect(() => {
     if (!adminToken) return
     api.checkInstance(id).then((inst) => {
-      if (inst.skill_name === "confidential_procurement") {
+      if (inst.skill_name === "confidential_data_procurement") {
         api.getProcurementResults(adminToken).then((r) => {
           if (r.results.length > 0) setProcResults(r.results)
         }).catch(() => {})

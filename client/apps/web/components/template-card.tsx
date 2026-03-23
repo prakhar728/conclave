@@ -24,26 +24,8 @@ export const TEMPLATE_CATALOG: Template[] = [
     neverLeaves: ["Raw idea content", "Deck text"],
   },
   {
-    name: "Investor Memo Scorer",
-    skill_name: "investor_memo",
-    icon: "📊",
-    status: "coming_soon",
-    goesIn: ["Investment memo", "Market thesis"],
-    comesOut: ["Strength score", "Risk assessment"],
-    neverLeaves: ["Memo content", "Financial data"],
-  },
-  {
-    name: "Team Fit Analyzer",
-    skill_name: "team_fit",
-    icon: "🤝",
-    status: "coming_soon",
-    goesIn: ["Role description", "Candidate profiles"],
-    comesOut: ["Fit score", "Skills overlap"],
-    neverLeaves: ["Candidate details", "Salary data"],
-  },
-  {
     name: "Confidential Data Procurement",
-    skill_name: "confidential_procurement",
+    skill_name: "confidential_data_procurement",
     icon: "🔐",
     status: "live",
     goesIn: [
@@ -64,6 +46,24 @@ export const TEMPLATE_CATALOG: Template[] = [
       "Supplier private data before agreement",
     ],
   },
+  {
+    name: "Investor Memo Scorer",
+    skill_name: "investor_memo",
+    icon: "📊",
+    status: "coming_soon",
+    goesIn: ["Investment memo", "Market thesis"],
+    comesOut: ["Strength score", "Risk assessment"],
+    neverLeaves: ["Memo content", "Financial data"],
+  },
+  {
+    name: "Team Fit Analyzer",
+    skill_name: "team_fit",
+    icon: "🤝",
+    status: "coming_soon",
+    goesIn: ["Role description", "Candidate profiles"],
+    comesOut: ["Fit score", "Skills overlap"],
+    neverLeaves: ["Candidate details", "Salary data"],
+  },
 ]
 
 interface TemplateCardProps {
@@ -78,14 +78,17 @@ export function TemplateCard({ template, selectable, selected, onSelect }: Templ
 
   return (
     <div
-      onClick={selectable ? onSelect : undefined}
+      onClick={selectable && isLive ? onSelect : undefined}
       className={cn(
         "rounded-2xl border bg-white p-6 transition-all",
-        selectable && "cursor-pointer",
-        selected
+        isLive && selectable && "cursor-pointer",
+        !isLive && "opacity-50 cursor-not-allowed select-none",
+        isLive && selected
           ? "border-primary ring-1 ring-primary/20"
-          : "border-[#d2d2d7] hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)]",
-        selectable && !selected && "hover:border-[#aeaeb2]",
+          : isLive
+          ? "border-[#d2d2d7] hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)]"
+          : "border-[#d2d2d7]",
+        isLive && selectable && !selected && "hover:border-[#aeaeb2]",
       )}
     >
       {/* Header */}
