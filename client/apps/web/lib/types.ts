@@ -212,4 +212,5 @@ export interface ProcurementResult {
   release_token?: ReleaseToken
   dataset_metrics: DatasetMetrics
   enclave_signature?: string
+  notes?: string[]
 }

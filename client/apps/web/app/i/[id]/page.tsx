@@ -832,9 +832,9 @@ function ParticipantContent({ id }: { id: string }) {
                     : "did not meet your reserve price."}
                   {" "}No data was shared outside the enclave.
                 </p>
-                {procResult.notes.length > 0 && (
+                {procResult.notes && procResult.notes.length > 0 && (
                   <ul className="mt-3 space-y-1">
-                    {procResult.notes.map((n, i) => (
+                    {procResult.notes!.map((n, i) => (
                       <li key={i} className="text-xs text-red-400">{n}</li>
                     ))}
                   </ul>
