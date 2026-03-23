@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/agent-core]
+    branches: [main, feat/agent-core, skills/dataset-procurement]
   pull_request:
     branches: [main]
 
