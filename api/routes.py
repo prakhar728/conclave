@@ -4,6 +4,7 @@ import logging
 import secrets
 import traceback
 import uuid
+from datetime import datetime
 from functools import partial
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -327,6 +328,7 @@ async def submit(submission: dict, request: Request):
 
     sid = validated.submission_id
     submission = validated.model_dump()  # ensure stored dict is normalized
+    submission["_submitted_at"] = datetime.utcnow().isoformat() + "Z"
 
     _submissions[instance_id][sid] = submission
     token_info["submission_ids"].add(sid)
@@ -359,6 +361,29 @@ def get_my_submissions(request: Request):
     """Return the submission IDs owned by the calling token."""
     token_info = _resolve_token(request)
     return {"submission_ids": list(token_info["submission_ids"])}
+
+
+@router.get("/submissions")
+def get_submissions(request: Request):
+    """Return per-submission metadata for the instance. Admin only. No raw content."""
+    token_info = _resolve_token(request)
+    if token_info["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can view submission metadata")
+
+    instance_id = token_info["instance_id"]
+    subs = _submissions.get(instance_id, {})
+
+    meta = []
+    for sub in subs.values():
+        meta.append({
+            "submission_id": sub.get("submission_id", ""),
+            "submitted_at": sub.get("_submitted_at"),
+            "has_text": bool(sub.get("idea_text")),
+            "has_file": bool(sub.get("idea_file")),
+            "has_repo": bool(sub.get("repo_summary")),
+        })
+
+    return {"submissions": meta}
 
 
 @router.post("/upload")

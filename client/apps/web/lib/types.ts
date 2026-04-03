@@ -60,6 +60,15 @@ export interface SubmitResponse {
   threshold?: number
 }
 
+// /submissions
+export interface SubmissionMeta {
+  submission_id: string
+  submitted_at: string | null
+  has_text: boolean
+  has_file: boolean
+  has_repo: boolean
+}
+
 // /results
 export interface NoveltyResult {
   submission_id: string
