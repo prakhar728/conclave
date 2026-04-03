@@ -460,8 +460,8 @@ def test_retrigger_on_6th_submission(client):
         assert len(r.json()["results"]) == 6
 
 
-def test_submit_missing_submission_id_returns_422(client):
-    """Submitting without a submission_id returns 422."""
+def test_submit_missing_required_field_returns_422(client):
+    """Submitting without the required idea_text field returns 422."""
     handler = _make_init_handler()
     with patch.object(skill_card, "init_handler", handler):
         r = client.post("/init", json={"skill_name": "hackathon_novelty", "message": "start"})
@@ -478,7 +478,7 @@ def test_submit_missing_submission_id_returns_422(client):
 
     r = client.post(
         "/submit",
-        json={"idea_text": "No submission_id provided"},
+        json={"submission_id": "sub_001"},  # missing required idea_text
         headers={"X-Instance-Token": user_token},
     )
     assert r.status_code == 422
