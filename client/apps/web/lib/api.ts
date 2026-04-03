@@ -15,6 +15,7 @@ import type {
   ReleaseToken,
   SettlementState,
   SkillCard,
+  SubmissionMeta,
   SubmitResponse,
   SupplierSubmission,
 } from "./types"
@@ -480,6 +481,14 @@ export const api = {
       return { results: MOCK_RESULTS }
     }
     return get("/results", token)
+  },
+
+  getSubmissions: async (token: string): Promise<{ submissions: SubmissionMeta[] }> => {
+    if (MOCK) {
+      await delay(300)
+      return { submissions: [] }
+    }
+    return get("/submissions", token)
   },
 
   // --- Procurement ---

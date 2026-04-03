@@ -20,7 +20,7 @@ import { ProcurementScorecard } from "@/components/procurement-scorecard"
 import { NegotiationPanel } from "@/components/negotiation-panel"
 import { ReleaseTokenCard } from "@/components/release-token-card"
 import { api } from "@/lib/api"
-import type { DisplayMap, NoveltyResult, ProcurementResult } from "@/lib/types"
+import type { DisplayMap, NoveltyResult, ProcurementResult, SubmissionMeta } from "@/lib/types"
 import { cn } from "@workspace/ui/lib/utils"
 import Link from "next/link"
 import { ArrowLeft } from "@phosphor-icons/react"
@@ -37,6 +37,7 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
   // Hackathon state
   const [results, setResults] = React.useState<NoveltyResult[]>([])
   const [display, setDisplay] = React.useState<DisplayMap>({})
+  const [submissionMetas, setSubmissionMetas] = React.useState<SubmissionMeta[]>([])
   const [triggering, setTriggering] = React.useState(false)
   const [triggered, setTriggered] = React.useState(false)
 
@@ -93,6 +94,9 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
             setTriggered(true)
           }
         }).catch(() => {})
+        api.getSubmissions(adminToken).then((r) => {
+          if (r.submissions.length > 0) setSubmissionMetas(r.submissions)
+        }).catch(() => {})
       }
     }).catch(() => {})
   }, [adminToken])
@@ -101,8 +105,12 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
     if (!adminToken) return
     setTriggering(true)
     await api.trigger(adminToken)
-    const r = await api.getAllResults(adminToken)
+    const [r, s] = await Promise.all([
+      api.getAllResults(adminToken),
+      api.getSubmissions(adminToken),
+    ])
     setResults(r.results)
+    setSubmissionMetas(s.submissions)
     setTriggered(true)
     setTriggering(false)
   }
@@ -422,20 +430,33 @@ export default function DashboardPage({ params }: { params: Promise<{ id: string
                             <td className="px-5 py-3.5 text-[#aeaeb2]">—</td>
                           </tr>
                         ))
-                    : Array.from({ length: subCount }).map((_, i) => (
-                        <tr key={i} className="border-b border-[#e8e8ed] last:border-0 hover:bg-[#f5f5f7]/50 transition-colors">
-                          <td className="px-5 py-3.5 text-sm text-[#6e6e73]">{i + 1}</td>
-                          <td className="px-5 py-3.5 text-sm font-mono text-[#6e6e73]">
-                            {new Date(Date.now() - i * 3600000).toLocaleString()}
-                          </td>
-                          <td className="px-5 py-3.5"><Check className="size-4 text-success" /></td>
-                          <td className="px-5 py-3.5 text-sm text-[#aeaeb2]">—</td>
-                          <td className="px-5 py-3.5"><Check className="size-4 text-success" /></td>
-                          <td className="px-5 py-3.5">
-                            <span className="text-xs text-[#6e6e73] bg-[#f5f5f7] rounded-full px-2.5 py-1">received</span>
-                          </td>
-                        </tr>
-                      ))
+                    : submissionMetas.length > 0
+                      ? submissionMetas.map((s, i) => (
+                          <tr key={s.submission_id} className="border-b border-[#e8e8ed] last:border-0 hover:bg-[#f5f5f7]/50 transition-colors">
+                            <td className="px-5 py-3.5 text-sm text-[#6e6e73]">{i + 1}</td>
+                            <td className="px-5 py-3.5 text-sm font-mono text-[#6e6e73]">
+                              {s.submitted_at ? new Date(s.submitted_at).toLocaleString() : "—"}
+                            </td>
+                            <td className="px-5 py-3.5">{s.has_text ? <Check className="size-4 text-success" /> : <span className="text-[#aeaeb2]">—</span>}</td>
+                            <td className="px-5 py-3.5">{s.has_file ? <Check className="size-4 text-success" /> : <span className="text-[#aeaeb2]">—</span>}</td>
+                            <td className="px-5 py-3.5">{s.has_repo ? <Check className="size-4 text-success" /> : <span className="text-[#aeaeb2]">—</span>}</td>
+                            <td className="px-5 py-3.5">
+                              <span className="text-xs text-[#6e6e73] bg-[#f5f5f7] rounded-full px-2.5 py-1">received</span>
+                            </td>
+                          </tr>
+                        ))
+                      : Array.from({ length: subCount }).map((_, i) => (
+                          <tr key={i} className="border-b border-[#e8e8ed] last:border-0">
+                            <td className="px-5 py-3.5 text-sm text-[#6e6e73]">{i + 1}</td>
+                            <td className="px-5 py-3.5 text-sm text-[#aeaeb2]">—</td>
+                            <td className="px-5 py-3.5 text-[#aeaeb2]">—</td>
+                            <td className="px-5 py-3.5 text-[#aeaeb2]">—</td>
+                            <td className="px-5 py-3.5 text-[#aeaeb2]">—</td>
+                            <td className="px-5 py-3.5">
+                              <span className="text-xs text-[#6e6e73] bg-[#f5f5f7] rounded-full px-2.5 py-1">received</span>
+                            </td>
+                          </tr>
+                        ))
                   }
                 </tbody>
               </table>
