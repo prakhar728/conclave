@@ -31,7 +31,7 @@ from skills.hackathon_novelty.init import hackathon_init_handler
 def run_skill(inputs: list[HackathonSubmission], params: OperatorConfig) -> SkillResponse:
     """Full 4-layer pipeline: ingest → deterministic → agent (multi-node graph) → guardrails → response."""
 
-    if len(inputs) < MIN_SUBMISSIONS:
+    if len(inputs) < params.min_submissions:
         return SkillResponse(
             skill="hackathon_novelty",
             results=[{"submission_id": s.submission_id, "status": "insufficient_submissions"} for s in inputs],

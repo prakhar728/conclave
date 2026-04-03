@@ -145,7 +145,7 @@ def hackathon_init_handler(message: str, conversation: list[dict]) -> dict:
                 "conversation": conversation,
             }
 
-        config = OperatorConfig(criteria=criteria, guidelines=guidelines)
+        config = OperatorConfig(criteria=criteria, guidelines=guidelines, min_submissions=threshold)
         ready_message = (
             f"Configuration saved.\n"
             f"Criteria: {json.dumps(criteria)}\n"

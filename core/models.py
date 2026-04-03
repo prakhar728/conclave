@@ -17,6 +17,7 @@ class OperatorConfig(BaseModel):
     criteria: dict[str, float]  # e.g. {"originality": 0.4, "feasibility": 0.3, "impact": 0.3}
     guidelines: str = ""
     instance_id: str = "default"
+    min_submissions: int = 5
 
 
 class SkillRequest(BaseModel):
