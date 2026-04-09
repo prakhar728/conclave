@@ -16,3 +16,5 @@ venv/
 eval_results/
 scripts/
 tests/fixtures/
+.agents/
+skills-lock.json
